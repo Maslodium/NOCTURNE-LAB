@@ -19,7 +19,7 @@ The editor starts with an empty canvas. Newly added geometry uses neutral transf
 
 ## Wallpaper Engine export
 
-The exported ZIP contains a self-contained web wallpaper and `project.json`. Its audio listener follows the Wallpaper Engine web API and combines the two 64-bin channels. When no Wallpaper Engine audio source is present, an idle spectrum keeps the preview alive.
+The exported ZIP contains a self-contained web wallpaper and `project.json`. Its audio listener follows the Wallpaper Engine web API. Wallpaper properties allow stereo, left, right, or strongest-channel capture, an extra gain multiplier, and an optional signal diagnostic overlay. The physical recording device remains a global Wallpaper Engine setting under **Settings → General → Media**. When no Wallpaper Engine audio source is present, the spectrum remains still unless idle motion was explicitly enabled.
 
 The runtime retries audio registration if the host API arrives late, applies optional automatic gain and a noise gate, and drops stale samples. Static scene layers are cached, animated wave geometry is batched into one `Path2D`, and expensive blur radii are capped for 4K playback. Idle spectrum motion is disabled by default so missing audio is not hidden.
 

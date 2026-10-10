@@ -32,7 +32,7 @@ $output = Join-Path $dist $OutputName
 $arguments = @(
     '/nologo', '/target:winexe', '/optimize+', '/platform:anycpu',
     ('/out:' + $output),
-    ('/win32icon:' + (Join-Path $root 'nocturne-wallpaper-mark.ico')),
+    ('/win32icon:' + (Join-Path $source 'nocturne-wallpaper-mark.ico')),
     ('/resource:' + $generatedPath + ',Nocturne.Wallpaper.html'),
     ('/resource:' + (Join-Path $source 'nocturne-wallpaper-mark.svg') + ',Nocturne.Wallpaper.svg'),
     ('/reference:' + (Join-Path $env:WINDIR 'Microsoft.NET\Framework\v4.0.30319\System.Windows.Forms.dll')),

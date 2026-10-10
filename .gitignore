@@ -12,3 +12,4 @@ Desktop.ini
 # Build scratch files (the release in dist is intentionally versioned)
 obj/
 bin/
+src/wallpaper-studio.html

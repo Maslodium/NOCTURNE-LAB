@@ -15,7 +15,7 @@ Run `..\build-wallpaper.ps1` after changing the base editor or extension module.
 
 A keyframe captures the complete scene. Numeric values and matching anchor arrays are interpolated between neighboring keys. Color values use RGB interpolation, while discrete properties switch halfway between keys. Motion is linear by default; the optional **Плавно** checkbox enables smoothstep easing.
 
-The editor starts with an empty canvas. Newly added geometry uses neutral transforms and zero bend/rotation. Every slider has a synchronized editable number field. The clock accepts an installed font name and can request the browser's local font list. Heavy wave and grid paths are cached, with reduced path detail while dragging.
+The editor starts with an empty canvas. Newly added geometry uses neutral transforms and zero bend/rotation. Every slider has a synchronized editable number field. The clock accepts an installed font name, can request the browser's local font list, or embed TTF/OTF/WOFF/WOFF2 data into the project. Heavy wave and grid paths are cached, with reduced path detail while dragging. Radial spectrum layers support a directed arc sector.
 
 ## Wallpaper Engine export
 

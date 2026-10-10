@@ -1,0 +1,14 @@
+# Local diagnostics and editor artifacts
+123.txt
+.playwright-cli/
+work/
+*.tmp
+*.bak
+
+# Windows metadata
+Thumbs.db
+Desktop.ini
+
+# Build scratch files (the release in dist is intentionally versioned)
+obj/
+bin/

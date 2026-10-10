@@ -15,15 +15,45 @@ featureStyle.textContent = `
   .key-dot { position:absolute; top:50%; width:8px; height:8px; transform:translate(-50%,-50%) rotate(45deg);
     background:#a9ff68; border:1px solid #071004; box-shadow:0 0 0 1px #a9ff6870; pointer-events:auto; cursor:pointer; }
   .bend-hint { color:#a9ff68; }
+  .value-edit { width:76px; height:25px; padding:2px 6px; text-align:right; font:11px ui-monospace,Consolas,monospace; }
+  .font-row { display:grid; grid-template-columns:1fr auto; gap:6px; }
   @media(max-width:1000px){.animbar{grid-template-columns:auto auto 1fr 58px}.animbar .wide-hide{display:none}}
 `;
 document.head.appendChild(featureStyle);
 
 types.spectrum = 'Аудиоспектр';
 types.clock = 'Часы и дата';
+types.globe = 'Глобус-сетка';
+
+/* Every slider also gets an editable numeric value. */
+row = function editableRow(name, key, min, max, step) {
+  const layer = pick();
+  return '<div class="row"><div class="label"><span>' + name + '</span><input class="value-edit" type="number" data-key="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + layer[key] + '"></div><input type="range" data-key="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + layer[key] + '"></div>';
+};
+rowState = function editableStateRow(name, key, min, max, step) {
+  return '<div class="row"><div class="label"><span>' + name + '</span><input class="value-edit" type="number" data-state="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + S[key] + '"></div><input type="range" data-state="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + S[key] + '"></div>';
+};
+const baseBind = bind;
+bind = function editableBind() {
+  baseBind();
+  [['key', '[data-key]'], ['state', '[data-state]']].forEach(([property, selector]) => {
+    panel.querySelectorAll(selector).forEach(input => {
+      if (!['range', 'number'].includes(input.type)) return;
+      const original = input.oninput;
+      input.oninput = event => {
+        original?.call(input, event);
+        const key = input.dataset[property];
+        panel.querySelectorAll(selector).forEach(peer => {
+          if (peer !== input && peer.dataset[property] === key && ['range', 'number'].includes(peer.type)) peer.value = input.value;
+        });
+      };
+    });
+  });
+};
 
 function ensureFeatureState() {
-  if (!S.animation) S.animation = { duration: 8, time: 0, playing: false, loop: true, easing: 'smooth', fps: 60, keyframes: [] };
+  if (!S.animation) S.animation = { duration: 8, time: 0, playing: false, loop: true, easing: 'linear', fps: 60, keyframes: [] };
+  if (!['linear', 'smooth'].includes(S.animation.easing)) S.animation.easing = 'linear';
   S.animation.duration = clamp(Number(S.animation.duration) || 8, 1, 120);
   S.animation.time = clamp(Number(S.animation.time) || 0, 0, S.animation.duration);
   if (!Array.isArray(S.animation.keyframes)) S.animation.keyframes = [];
@@ -31,9 +61,13 @@ function ensureFeatureState() {
     if (layer.type === 'grid') {
       if (!Array.isArray(layer.bendAnchors)) layer.bendAnchors = [];
       if (!Number.isFinite(layer.anchorRadius)) layer.anchorRadius = .14;
+      if (!layer.bendSide) layer.bendSide = 'all';
+      if (!layer.bendAxis) layer.bendAxis = 'both';
+      if (!Number.isFinite(layer.bendFeather)) layer.bendFeather = .12;
     }
     if (layer.type === 'spectrum') normalizeSpectrum(layer);
     if (layer.type === 'clock') normalizeClock(layer);
+    if (layer.type === 'globe') normalizeGlobe(layer);
   });
 }
 
@@ -53,6 +87,16 @@ function Clock(o = {}) {
     fontSize: 96, fontWeight: 600, letterSpacing: 2, textAlign: 'center',
     timeFormat: '24', showSeconds: true, showDate: true, dateFormat: 'long',
     locale: 'ru-RU', uppercase: false, lineGap: .42, glow: 10, glowColor: '#ffffff'
+  }, o));
+}
+
+function Globe(o = {}) {
+  return base(Object.assign({
+    id: id++, type: 'globe', name: 'Глобус-сетка', color: '#a9ff68', color2: '#35d7ff',
+    opacity: .72, blend: 'screen', x: .5, y: .5, radius: .25, latitudes: 12,
+    longitudes: 20, flatten: 1, tilt: 0, spin: 0, perspective: 0,
+    backOpacity: .18, width: 1, autoRotate: false, rotateSpeed: 8, glow: 8,
+    glowColor: '#a9ff68', paint: 'gradient'
   }, o));
 }
 
@@ -84,6 +128,15 @@ function normalizeClock(layer) {
   return layer;
 }
 
+function normalizeGlobe(layer) {
+  const defaults = { color: '#a9ff68', color2: '#35d7ff', opacity: .72, blend: 'screen', x: .5, y: .5,
+    scale: 1, rotation: 0, radius: .25, latitudes: 12, longitudes: 20, flatten: 1, tilt: 0,
+    spin: 0, perspective: 0, backOpacity: .18, width: 1, autoRotate: false, rotateSpeed: 8,
+    glow: 8, glowColor: '#a9ff68', paint: 'gradient', style: 'solid', patternDensity: 1 };
+  Object.keys(defaults).forEach(key => { if (layer[key] === undefined) layer[key] = defaults[key]; });
+  return layer;
+}
+
 const addArea = document.querySelector('.add');
 const spectrumButton = document.createElement('button');
 spectrumButton.id = 'spectrum';
@@ -97,6 +150,10 @@ clockButton.textContent = '+ Часы';
 clockButton.title = 'Дата и время';
 addArea.insertBefore(clockButton, addArea.lastElementChild);
 clockButton.onclick = () => add(Clock({ name: 'Часы ' + (S.layers.filter(x => x.type === 'clock').length + 1) }));
+const globeButton = document.createElement('button');
+globeButton.id = 'globe'; globeButton.textContent = '+ Глобус'; globeButton.title = 'Сферическая координатная сетка';
+addArea.insertBefore(globeButton, addArea.lastElementChild);
+globeButton.onclick = () => add(Globe({ name: 'Глобус ' + (S.layers.filter(x => x.type === 'globe').length + 1) }));
 
 /* Two-dimensional Gaussian deformation for perspective grids. */
 function gridAnchorPull(layer, u, t, ignored) {
@@ -105,9 +162,12 @@ function gridAnchorPull(layer, u, t, ignored) {
     if (anchor === ignored) return out;
     const du = (u - anchor.u) / radius;
     const dt = (t - anchor.t) / radius;
-    const influence = Math.exp(-(du * du + dt * dt) * 1.8);
-    out.x += (anchor.dx || 0) * S.w * influence;
-    out.y += (anchor.dy || 0) * S.h * influence;
+    let influence = Math.exp(-(du * du + dt * dt) * 1.8);
+    const feather = Math.max(.01, layer.bendFeather || .12);
+    const sideDistance = layer.bendSide === 'left' ? anchor.u - u : layer.bendSide === 'right' ? u - anchor.u : layer.bendSide === 'top' ? anchor.t - t : layer.bendSide === 'bottom' ? t - anchor.t : feather;
+    if (layer.bendSide !== 'all') influence *= clamp(sideDistance / feather + .5, 0, 1);
+    if (layer.bendAxis !== 'vertical') out.x += (anchor.dx || 0) * S.w * influence;
+    if (layer.bendAxis !== 'horizontal') out.y += (anchor.dy || 0) * S.h * influence;
     return out;
   }, { x: 0, y: 0 });
 }
@@ -128,7 +188,59 @@ function gridAnchorWorld(layer, anchor) {
   return localToWorld(layer, basePoint.x + pull.x, basePoint.y + pull.y);
 }
 
+const wavePathCache = new WeakMap(), gridPathCache = new WeakMap();
+
+wavePass = function cachedWavePass(layer, glow) {
+  const dynamic = !!S.drag || !!S.animation?.playing;
+  const lineStride = Math.max(1, Math.ceil(layer.lines / (dynamic ? 90 : 180)));
+  const steps = dynamic ? 72 : Math.max(80, Math.min(160, Math.round(150 * 96 / Math.max(96, layer.lines))));
+  const signature = [S.w, S.h, layer.lines, layer.amplitude, layer.frequency, layer.phase, layer.twist, layer.spread, layer.anchorRadius, JSON.stringify(layer.anchors || []), lineStride, steps].join('|');
+  let cached = wavePathCache.get(layer);
+  if (!cached || cached.signature !== signature) {
+    const path = new Path2D();
+    for (let n = 0; n < layer.lines; n += lineStride) {
+      const k = n / Math.max(1, layer.lines - 1) - .5;
+      for (let i = 0; i <= steps; i++) {
+        const u = i / steps, x = (u - .5) * S.w * 1.35, y = waveBase(layer, u, k) + anchorPull(layer, u);
+        i ? path.lineTo(x, y) : path.moveTo(x, y);
+      }
+    }
+    cached = { signature, path }; wavePathCache.set(layer, cached);
+  }
+  c.save(); transform(c, layer);
+  c.globalAlpha = layer.opacity * (glow ? .72 : 1);
+  c.globalCompositeOperation = glow ? 'lighter' : layer.blend;
+  c.filter = glow ? 'blur(' + Math.max(2, layer.glow * S.w / 1920) + 'px)' : 'none';
+  c.strokeStyle = glow ? layer.glowColor : paint(c, layer, S.w * 1.35, S.h);
+  c.lineWidth = layer.width * S.w / 1920 * (glow ? 2.2 : 1) * Math.sqrt(lineStride);
+  stroke(c, layer); c.stroke(cached.path); c.restore();
+};
+
 gridPass = function enhancedGridPass(layer, glow) {
+  const dynamic = !!S.drag || !!S.animation?.playing;
+  const stepsU = dynamic ? 64 : 100, stepsT = dynamic ? 46 : 70;
+  const rows = Math.max(2, layer.lines), columns = Math.max(3, Math.round(rows * 1.55));
+  const stride = Math.max(1, Math.ceil(Math.max(rows, columns) / (dynamic ? 100 : 170)));
+  const signature = [S.w, S.h, rows, layer.bend, layer.perspective, layer.anchorRadius, layer.bendSide, layer.bendAxis, layer.bendFeather, JSON.stringify(layer.bendAnchors || []), stepsU, stepsT, stride].join('|');
+  let cached = gridPathCache.get(layer);
+  if (!cached || cached.signature !== signature) {
+    const path = new Path2D();
+    for (let rowIndex = 0; rowIndex <= rows; rowIndex += stride) {
+      const t = rowIndex / rows;
+      for (let step = 0; step <= stepsU; step++) {
+        const u = step / stepsU, point = gridBasePoint(layer, u, t), pull = gridAnchorPull(layer, u, t);
+        step ? path.lineTo(point.x + pull.x, point.y + pull.y) : path.moveTo(point.x + pull.x, point.y + pull.y);
+      }
+    }
+    for (let columnIndex = 0; columnIndex <= columns; columnIndex += stride) {
+      const u = columnIndex / columns;
+      for (let step = 0; step <= stepsT; step++) {
+        const t = step / stepsT, point = gridBasePoint(layer, u, t), pull = gridAnchorPull(layer, u, t);
+        step ? path.lineTo(point.x + pull.x, point.y + pull.y) : path.moveTo(point.x + pull.x, point.y + pull.y);
+      }
+    }
+    cached = { signature, path }; gridPathCache.set(layer, cached);
+  }
   c.save();
   transform(c, layer);
   c.globalAlpha = layer.opacity * (glow ? .68 : 1);
@@ -136,32 +248,8 @@ gridPass = function enhancedGridPass(layer, glow) {
   c.filter = glow ? 'blur(' + Math.max(2, layer.glow * S.w / 1920) + 'px)' : 'none';
   c.lineWidth = layer.width * S.w / 1920 * (glow ? 2.1 : 1);
   stroke(c, layer);
-  const rows = Math.max(2, layer.lines);
-  const columns = Math.max(3, Math.round(rows * 1.55));
-  for (let rowIndex = 0; rowIndex <= rows; rowIndex++) {
-    const t = rowIndex / rows;
-    c.strokeStyle = glow ? layer.glowColor : (layer.paint === 'gradient' ? mix(layer.color, layer.color2, t) : layer.color);
-    c.beginPath();
-    for (let step = 0; step <= 110; step++) {
-      const u = step / 110;
-      const point = gridBasePoint(layer, u, t);
-      const pull = gridAnchorPull(layer, u, t);
-      step ? c.lineTo(point.x + pull.x, point.y + pull.y) : c.moveTo(point.x + pull.x, point.y + pull.y);
-    }
-    c.stroke();
-  }
-  for (let columnIndex = 0; columnIndex <= columns; columnIndex++) {
-    const u = columnIndex / columns;
-    c.strokeStyle = glow ? layer.glowColor : (layer.paint === 'gradient' ? mix(layer.color, layer.color2, u) : layer.color);
-    c.beginPath();
-    for (let step = 0; step <= 70; step++) {
-      const t = step / 70;
-      const point = gridBasePoint(layer, u, t);
-      const pull = gridAnchorPull(layer, u, t);
-      step ? c.lineTo(point.x + pull.x, point.y + pull.y) : c.moveTo(point.x + pull.x, point.y + pull.y);
-    }
-    c.stroke();
-  }
+  c.strokeStyle = glow ? layer.glowColor : paint(c, layer, S.w * 1.18, S.h * .92);
+  c.stroke(cached.path);
   c.restore();
 };
 
@@ -403,10 +491,50 @@ function drawClock(layer) {
   c.restore();
 }
 
+function globePoint(layer, latitude, longitude) {
+  const spin = (layer.spin + (layer.autoRotate ? featureClock * layer.rotateSpeed : 0)) * Math.PI / 180;
+  const tilt = layer.tilt * Math.PI / 180;
+  let px = Math.cos(latitude) * Math.sin(longitude + spin), py = Math.sin(latitude), pz = Math.cos(latitude) * Math.cos(longitude + spin);
+  const ry = py * Math.cos(tilt) - pz * Math.sin(tilt), rz = py * Math.sin(tilt) + pz * Math.cos(tilt);
+  const scale = 1 / Math.max(.35, 1 + rz * layer.perspective);
+  const radius = Math.min(S.w, S.h) * layer.radius;
+  return { x: px * radius * scale, y: ry * radius * layer.flatten * scale, z: rz };
+}
+
+function drawGlobe(layer) {
+  normalizeGlobe(layer);
+  const front = new Path2D(), back = new Path2D(), segments = S.drag ? 48 : 80;
+  const trace = points => {
+    let target = points[0].z <= 0 ? front : back, previous = target;
+    points.forEach((point, index) => {
+      target = point.z <= 0 ? front : back;
+      if (!index || target !== previous) target.moveTo(point.x, point.y); else target.lineTo(point.x, point.y);
+      previous = target;
+    });
+  };
+  for (let i = 1; i < layer.latitudes; i++) {
+    const latitude = -Math.PI / 2 + Math.PI * i / layer.latitudes, points = [];
+    for (let s = 0; s <= segments; s++) points.push(globePoint(layer, latitude, Math.PI * 2 * s / segments));
+    trace(points);
+  }
+  for (let i = 0; i < layer.longitudes; i++) {
+    const longitude = Math.PI * 2 * i / layer.longitudes, points = [];
+    for (let s = 0; s <= segments; s++) points.push(globePoint(layer, -Math.PI / 2 + Math.PI * s / segments, longitude));
+    trace(points);
+  }
+  c.save(); transform(c, layer); c.globalCompositeOperation = layer.blend;
+  c.lineWidth = layer.width * S.w / 1920; stroke(c, layer);
+  c.strokeStyle = layer.paint === 'gradient' ? paint(c, layer, Math.min(S.w, S.h) * layer.radius * 2, Math.min(S.w, S.h) * layer.radius * 2) : layer.color;
+  c.shadowBlur = layer.glow * S.w / 1920; c.shadowColor = layer.glowColor;
+  c.globalAlpha = layer.opacity * layer.backOpacity; c.stroke(back);
+  c.globalAlpha = layer.opacity; c.stroke(front); c.restore();
+}
+
 const originalDrawImage = drawImage;
 drawImage = function enhancedDrawImage(layer) {
   if (layer.type === 'spectrum') return drawSpectrum(layer);
   if (layer.type === 'clock') return drawClock(layer);
+  if (layer.type === 'globe') return drawGlobe(layer);
   return originalDrawImage(layer);
 };
 
@@ -417,12 +545,16 @@ ui = function enhancedUi() {
   originalUi();
   const layer = pick();
   if (!layer) return;
+  if (layer.type === 'wave') panel.querySelectorAll('[data-key="amplitude"]').forEach(input => { input.min = 0; });
   if (layer.type === 'grid') {
     const geometry = [...panel.querySelectorAll('.group')].find(group => group.querySelector('h3')?.textContent.includes('Геометрия сетки'));
     if (geometry) {
       const body = geometry.querySelector('.group-body') || geometry;
       const block = document.createElement('div');
       block.innerHTML = row('Радиус точек изгиба', 'anchorRadius', .025, .35, .005, value => Math.round(value * 100) + '%') +
+        row('Мягкость границы', 'bendFeather', .01, .5, .01) +
+        '<div class="row"><div class="label">Сторона изгиба</div><select style="width:100%" data-key="bendSide"><option value="all" ' + (layer.bendSide === 'all' ? 'selected' : '') + '>во все стороны</option><option value="left" ' + (layer.bendSide === 'left' ? 'selected' : '') + '>только слева</option><option value="right" ' + (layer.bendSide === 'right' ? 'selected' : '') + '>только справа</option><option value="top" ' + (layer.bendSide === 'top' ? 'selected' : '') + '>только сверху</option><option value="bottom" ' + (layer.bendSide === 'bottom' ? 'selected' : '') + '>только снизу</option></select></div>' +
+        '<div class="row"><div class="label">Ось смещения</div><select style="width:100%" data-key="bendAxis"><option value="both" ' + (layer.bendAxis === 'both' ? 'selected' : '') + '>X и Y</option><option value="horizontal" ' + (layer.bendAxis === 'horizontal' ? 'selected' : '') + '>только X</option><option value="vertical" ' + (layer.bendAxis === 'vertical' ? 'selected' : '') + '>только Y</option></select></div>' +
         '<div class="pair"><button data-add-grid-anchor>' + (S.adding ? 'Кликните по сетке' : 'Добавить точку') + '</button>' +
         '<button data-del-grid-anchor ' + (S.anchor === null ? 'disabled' : '') + '>Удалить</button></div>' +
         '<div class="note bend-hint">Двойной клик по сетке также создаёт точку изгиба.</div>';
@@ -449,11 +581,11 @@ ui = function enhancedUi() {
     panel.querySelectorAll('[data-spectrum-bool]').forEach(input => input.onchange = () => { layer[input.dataset.spectrumBool] = input.checked; draw(); });
   }
   if (layer.type === 'clock') {
-    const fonts = ['Segoe UI', 'Arial', 'Georgia', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Courier New', 'Consolas', 'Impact'];
-    const fontOptions = fonts.map(font => '<option value="' + font + '" ' + (layer.fontFamily === font ? 'selected' : '') + '>' + font + '</option>').join('');
+    const fonts = window.nocturneLocalFonts || ['Segoe UI', 'Arial', 'Georgia', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Courier New', 'Consolas', 'Impact'];
+    const fontOptions = fonts.map(font => '<option value="' + String(font).replace(/"/g, '&quot;') + '"></option>').join('');
     const weightOptions = [300, 400, 500, 600, 700, 800, 900].map(weight => '<option value="' + weight + '" ' + (+layer.fontWeight === weight ? 'selected' : '') + '>' + weight + '</option>').join('');
     panel.innerHTML = '<div class="group"><h3>Дата и время</h3>' + color('Цвет времени', 'color') + color('Цвет даты', 'color2') +
-      '<div class="row"><div class="label">Шрифт</div><select style="width:100%" data-key="fontFamily">' + fontOptions + '</select></div>' +
+      '<div class="row"><div class="label">Шрифт с компьютера</div><div class="font-row"><input list="nocturne-fonts" data-key="fontFamily" value="' + String(layer.fontFamily).replace(/"/g, '&quot;') + '"><button type="button" data-load-fonts title="Запросить список установленных шрифтов">↻</button></div><datalist id="nocturne-fonts">' + fontOptions + '</datalist></div>' +
       '<div class="row"><div class="label">Начертание</div><select style="width:100%" data-key="fontWeight">' + weightOptions + '</select></div>' +
       row('Размер', 'fontSize', 24, 280, 1, value => value + ' px') + row('Интервал', 'letterSpacing', -4, 30, .5, value => value + ' px') +
       row('Расстояние до даты', 'lineGap', .15, 1.2, .01, value => Math.round(value * 100) + '%') +
@@ -468,6 +600,25 @@ ui = function enhancedUi() {
       '<div class="pair"><div class="row"><div class="label">X</div><input style="width:100%" type="number" data-key="x" step=".01" value="' + layer.x.toFixed(2) + '"></div><div class="row"><div class="label">Y</div><input style="width:100%" type="number" data-key="y" step=".01" value="' + layer.y.toFixed(2) + '"></div></div></div>';
     bind();
     panel.querySelectorAll('[data-clock-bool]').forEach(input => input.onchange = () => { layer[input.dataset.clockBool] = input.checked; draw(); });
+    panel.querySelector('[data-load-fonts]')?.addEventListener('click', async () => {
+      if (typeof window.queryLocalFonts !== 'function') return toast('Введите название установленного шрифта вручную');
+      try {
+        const fontData = await window.queryLocalFonts();
+        window.nocturneLocalFonts = [...new Set(fontData.map(font => font.family).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        toast('Загружено шрифтов: ' + window.nocturneLocalFonts.length); ui();
+      } catch (error) { toast('Доступ к шрифтам не выдан — название можно ввести вручную'); }
+    });
+  }
+  if (layer.type === 'globe') {
+    panel.innerHTML = '<div class="group"><h3>Глобус-сетка</h3>' + color('Основной цвет', 'color') + color('Второй цвет', 'color2') +
+      row('Широты', 'latitudes', 3, 48, 1) + row('Долготы', 'longitudes', 4, 72, 1) + row('Радиус', 'radius', .05, .7, .01) +
+      row('Сплющивание', 'flatten', .2, 2, .01) + row('Наклон', 'tilt', -90, 90, 1) + row('Поворот сферы', 'spin', -180, 180, 1) +
+      row('Перспектива', 'perspective', 0, .8, .01) + row('Задняя полусфера', 'backOpacity', 0, 1, .01) +
+      '<div class="row"><label><input type="checkbox" data-globe-auto ' + (layer.autoRotate ? 'checked' : '') + '> Автовращение</label></div>' + row('Скорость вращения', 'rotateSpeed', -60, 60, 1) + '</div>' +
+      styleGroup(layer) + '<div class="group"><h3>Положение</h3>' + row('Масштаб', 'scale', .1, 3, .01) + row('Поворот слоя', 'rotation', -180, 180, 1) +
+      '<div class="pair"><div class="row"><div class="label">X</div><input style="width:100%" type="number" data-key="x" step=".01" value="' + layer.x.toFixed(2) + '"></div><div class="row"><div class="label">Y</div><input style="width:100%" type="number" data-key="y" step=".01" value="' + layer.y.toFixed(2) + '"></div></div></div>';
+    bind();
+    panel.querySelector('[data-globe-auto]').onchange = event => { layer.autoRotate = event.target.checked; draw(); };
   }
 };
 
@@ -527,6 +678,7 @@ animationBar.className = 'animbar';
 animationBar.innerHTML = '<button data-play title="Воспроизвести">▶</button><button data-key title="Записать состояние в текущей позиции">+ Ключ</button>' +
   '<div class="timeline-wrap"><input data-time type="range" min="0" max="8" step=".01" value="0"><div class="key-dots"></div></div>' +
   '<div class="anim-time">0.00 s</div><label class="wide-hide">Длина <input data-duration type="number" min="1" max="120" step=".5" value="8" style="width:58px"></label>' +
+  '<label class="wide-hide" title="Ускорение и замедление возле ключевых точек"><input data-easing type="checkbox"> Плавно</label>' +
   '<select data-fps class="wide-hide" title="Ограничение FPS"><option value="30">30 FPS</option><option value="60" selected>60 FPS</option></select>' +
   '<button data-export class="wide-hide">Wallpaper Engine</button>';
 document.querySelector('main').appendChild(animationBar);
@@ -539,6 +691,7 @@ function refreshTimeline() {
   timeInput.max = S.animation.duration;
   timeInput.value = S.animation.time;
   durationInput.value = S.animation.duration;
+  animationBar.querySelector('[data-easing]').checked = S.animation.easing === 'smooth';
   animationBar.querySelector('.anim-time').textContent = S.animation.time.toFixed(2) + ' s';
   playButton.textContent = S.animation.playing ? '❚❚' : '▶';
   const dots = animationBar.querySelector('.key-dots');
@@ -554,6 +707,7 @@ function refreshTimeline() {
 timeInput.oninput = () => { S.animation.playing = false; S.animation.time = +timeInput.value; sampleAnimation(S.animation.time); refreshTimeline(); sync(); };
 durationInput.onchange = () => { S.animation.duration = clamp(+durationInput.value || 8, 1, 120); S.animation.time = Math.min(S.animation.time, S.animation.duration); refreshTimeline(); };
 animationBar.querySelector('[data-fps]').onchange = event => { S.animation.fps = +event.target.value; };
+animationBar.querySelector('[data-easing]').onchange = event => { S.animation.easing = event.target.checked ? 'smooth' : 'linear'; sampleAnimation(S.animation.time); draw(); };
 playButton.onclick = () => { if (S.animation.keyframes.length < 2) return toast('Добавьте минимум два ключа'); S.animation.playing = !S.animation.playing; refreshTimeline(); };
 animationBar.querySelector('[data-key]').onclick = () => {
   const existing = S.animation.keyframes.find(frame => Math.abs(frame.time - S.animation.time) < .02);
@@ -570,7 +724,8 @@ function featureTick(now) {
   const animated = S.animation.playing;
   const hasSpectrum = S.layers.some(layer => layer.visible && layer.type === 'spectrum');
   const hasClock = S.layers.some(layer => layer.visible && layer.type === 'clock');
-  const reactive = hasSpectrum || hasClock;
+  const hasRotatingGlobe = S.layers.some(layer => layer.visible && layer.type === 'globe' && layer.autoRotate);
+  const reactive = hasSpectrum || hasClock || hasRotatingGlobe;
   const targetFrame = animated || hasSpectrum ? 1 / (S.animation.fps || 60) : 1;
   accumulatedFrameTime += delta;
   if ((animated || reactive) && accumulatedFrameTime >= targetFrame) {
@@ -604,7 +759,7 @@ restoreProject = function enhancedRestoreProject(project) {
   const animation = incoming.animation;
   incoming.version = 1;
   originalRestoreProject(incoming);
-  S.animation = animation || { duration: 8, time: 0, playing: false, loop: true, easing: 'smooth', fps: 60, keyframes: [] };
+  S.animation = animation || { duration: 8, time: 0, playing: false, loop: true, easing: 'linear', fps: 60, keyframes: [] };
   S.animation.playing = false;
   ensureFeatureState(); refreshTimeline(); sync();
 };
@@ -644,13 +799,14 @@ function audio(samples){hasAudio=true;for(let i=0;i<64;i++)bins[i]=Math.min(1.5,
 window.nocturneWallpaperAudioListener=audio;if(typeof window.wallpaperRegisterAudioListener==='function')window.wallpaperRegisterAudioListener(audio);
 function clone(v){return JSON.parse(JSON.stringify(v))}function iv(a,b,t){if(typeof a==='number'&&typeof b==='number')return a+(b-a)*t;if(Array.isArray(a)&&Array.isArray(b)&&a.length===b.length)return a.map((v,i)=>iv(v,b[i],t));if(a&&b&&typeof a==='object'&&typeof b==='object'){let o={};new Set([...Object.keys(a),...Object.keys(b)]).forEach(k=>o[k]=iv(a[k],b[k],t));return o}return t<.5?clone(a):clone(b)}
 function sceneAt(t){let base={canvas:P.canvas,layers:P.layers},a=P.animation,f=a?.keyframes||[];if(!f.length)return clone(base);f=f.slice().sort((q,w)=>q.time-w.time);if(t<=f[0].time)return clone(f[0].state);if(t>=f[f.length-1].time)return clone(f[f.length-1].state);let i=f.findIndex(q=>q.time>=t),l=f[i-1],r=f[i],u=(t-l.time)/(r.time-l.time);if(a.easing==='smooth')u=u*u*(3-2*u);return iv(l.state,r.state,u)}
-function tr(l){x.translate(l.x*P.canvas.w,l.y*P.canvas.h);x.rotate(l.rotation*Math.PI/180);x.scale(l.scale*(l.scaleX||1),l.scale*(l.scaleY||1))}function pull(l,u,t){let r=Math.max(.025,l.anchorRadius||.14),o={x:0,y:0};(l.bendAnchors||[]).forEach(a=>{let du=(u-a.u)/r,dt=(t-a.t)/r,k=Math.exp(-(du*du+dt*dt)*1.8);o.x+=(a.dx||0)*P.canvas.w*k;o.y+=(a.dy||0)*P.canvas.h*k});return o}function gp(l,u,t){let W=P.canvas.w*1.18,H=P.canvas.h*.92,d=Math.pow(t,1+l.perspective*2);return{x:(u-.5)*W*(1+(1-d)*l.perspective*1.6),y:(d-.5)*H+Math.sin(u*Math.PI*2+t*4)*l.bend*P.canvas.h*(1-t*.55)}}
+function tr(l){x.translate(l.x*P.canvas.w,l.y*P.canvas.h);x.rotate(l.rotation*Math.PI/180);x.scale(l.scale*(l.scaleX||1),l.scale*(l.scaleY||1))}function pull(l,u,t){let r=Math.max(.025,l.anchorRadius||.14),o={x:0,y:0};(l.bendAnchors||[]).forEach(a=>{let du=(u-a.u)/r,dt=(t-a.t)/r,k=Math.exp(-(du*du+dt*dt)*1.8),f=Math.max(.01,l.bendFeather||.12),sd=l.bendSide==='left'?a.u-u:l.bendSide==='right'?u-a.u:l.bendSide==='top'?a.t-t:l.bendSide==='bottom'?t-a.t:f;if(l.bendSide&&l.bendSide!=='all')k*=clamp(sd/f+.5,0,1);if(l.bendAxis!=='vertical')o.x+=(a.dx||0)*P.canvas.w*k;if(l.bendAxis!=='horizontal')o.y+=(a.dy||0)*P.canvas.h*k});return o}function gp(l,u,t){let W=P.canvas.w*1.18,H=P.canvas.h*.92,d=Math.pow(t,1+l.perspective*2);return{x:(u-.5)*W*(1+(1-d)*l.perspective*1.6),y:(d-.5)*H+Math.sin(u*Math.PI*2+t*4)*l.bend*P.canvas.h*(1-t*.55)}}
 function wave(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.strokeStyle=l.color;x.lineWidth=l.width*P.canvas.w/1920;for(let n=0;n<l.lines;n++){let k=n/(l.lines-1)-.5;x.beginPath();for(let i=0;i<=140;i++){let u=i/140,base=k*l.spread*P.canvas.h+Math.sin(u*Math.PI*2*l.frequency+l.phase+k*l.twist*8)*l.amplitude*P.canvas.h*Math.sin(Math.PI*u)+Math.sin(u*Math.PI*4+l.phase*.45)*l.amplitude*P.canvas.h*.18+Math.sin(u*Math.PI*2+l.phase+k*3)*k*l.twist*P.canvas.h*.17,ap=(l.anchors||[]).reduce((s,a)=>s+a.dy*P.canvas.h*Math.exp(-Math.pow((u-a.u)/(l.anchorRadius||.1),2)*2.2),0),px=(u-.5)*P.canvas.w*1.35,py=base+ap;i?x.lineTo(px,py):x.moveTo(px,py)}x.stroke()}x.restore()}
 function grid(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.lineWidth=l.width*P.canvas.w/1920;let R=l.lines,C=Math.round(R*1.55);for(let r=0;r<=R;r++){let t=r/R;x.strokeStyle=l.paint==='gradient'?mix(l.color,l.color2,t):l.color;x.beginPath();for(let i=0;i<=100;i++){let u=i/100,p=gp(l,u,t),q=pull(l,u,t);i?x.lineTo(p.x+q.x,p.y+q.y):x.moveTo(p.x+q.x,p.y+q.y)}x.stroke()}for(let q=0;q<=C;q++){let u=q/C;x.strokeStyle=l.paint==='gradient'?mix(l.color,l.color2,u):l.color;x.beginPath();for(let i=0;i<=70;i++){let t=i/70,p=gp(l,u,t),d=pull(l,u,t);i?x.lineTo(p.x+d.x,p.y+d.y):x.moveTo(p.x+d.x,p.y+d.y)}x.stroke()}x.restore()}
 function spot(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;let r=l.radius*P.canvas.w,g=x.createRadialGradient(0,0,r*(1-l.softness),0,0,r),A=rgb(l.color),B=rgb(l.color2);g.addColorStop(0,'rgba('+A.join(',')+',1)');g.addColorStop(.52,'rgba('+B.join(',')+',.62)');g.addColorStop(1,'rgba('+B.join(',')+',0)');x.scale(l.stretch,1);x.fillStyle=g;x.fillRect(-r,-r,r*2,r*2);x.restore()}
 function spectrum(l,time){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.shadowBlur=(l.glow||0)*P.canvas.w/1920;x.shadowColor=l.glowColor;let n=Math.round(clamp(l.bars||48,8,64)),W=l.width*P.canvas.w,H=l.height*P.canvas.h,s=W/n,bw=s*(1-l.gap),values=[];for(let i=0;i<n;i++){let t=i/(n-1),j=Math.round(t*63),idle=.16+.12*Math.sin(time*1.8+j*.37)+.05*Math.sin(time*.7+j*.11),target=hasAudio?bins[j]:(l.idleMotion?Math.max(.02,idle):0);smooth[j]=smooth[j]*(l.smoothing||.72)+target*(1-(l.smoothing||.72));values.push(Math.min(1.5,smooth[j]*(l.sensitivity||1.35)))}if(l.spectrumStyle==='line'){let line=sign=>{x.beginPath();for(let i=0;i<n;i++){let t=i/(n-1),px=(t-.5)*W,py=sign*values[i]*H;i?x.lineTo(px,py):x.moveTo(px,py)}x.stroke()};x.strokeStyle=l.color;x.lineWidth=Math.max(1,(l.patternDensity||1)*P.canvas.w/1920);line(-1);if(l.mirror){x.globalAlpha=l.opacity*.48;line(1)}}else for(let i=0;i<n;i++){let t=i/(n-1),v=values[i];x.fillStyle=mix(l.color,l.color2,t);if(l.spectrumStyle==='radial'){let r=Math.min(P.canvas.w,P.canvas.h)*l.width*.28,a=-Math.PI/2+t*Math.PI*2;x.strokeStyle=x.fillStyle;x.lineWidth=Math.max(1,bw*.32);x.beginPath();x.moveTo(Math.cos(a)*r,Math.sin(a)*r);x.lineTo(Math.cos(a)*(r+v*H*.55),Math.sin(a)*(r+v*H*.55));x.stroke()}else{x.fillRect(-W/2+i*s,-v*H,bw,Math.max(1,v*H));if(l.mirror){x.globalAlpha=l.opacity*.48;x.fillRect(-W/2+i*s,0,bw,Math.max(1,v*H));x.globalAlpha=l.opacity}}}x.restore()}
 function clock(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.fillStyle=l.color;x.shadowBlur=(l.glow||0)*P.canvas.w/1920;x.shadowColor=l.glowColor;x.textBaseline='middle';let d=new Date(),to={hour:'2-digit',minute:'2-digit',second:l.showSeconds?'2-digit':undefined,hour12:l.timeFormat==='12'},dao=l.dateFormat==='numeric'?{year:'numeric',month:'2-digit',day:'2-digit'}:l.dateFormat==='weekday'?{weekday:'long',year:'numeric',month:'long',day:'numeric'}:{year:'numeric',month:'long',day:'numeric'},time=new Intl.DateTimeFormat(l.locale||'ru-RU',to).format(d),date=new Intl.DateTimeFormat(l.locale||'ru-RU',dao).format(d);if(l.uppercase){time=time.toUpperCase();date=date.toUpperCase()}let text=(value,y,size,color)=>{x.font=(size===l.fontSize?(l.fontWeight||600)+' ':'')+size+'px "'+(l.fontFamily||'Segoe UI').replace(/"/g,'')+'"';x.fillStyle=color;x.textAlign=l.textAlign||'center';x.fillText(value,0,y)};text(time,l.showDate?-l.fontSize*(l.lineGap||.42)*.5:0,l.fontSize,l.color);if(l.showDate)text(date,l.fontSize*(l.lineGap||.42)*1.05,Math.max(12,l.fontSize*.34),l.color2);x.restore()}
-function resize(){let d=Math.min(2,devicePixelRatio||1);cv.width=Math.max(1,innerWidth*d);cv.height=Math.max(1,innerHeight*d)}addEventListener('resize',resize);resize();let last=0;function frame(now){requestAnimationFrame(frame);let fps=P.animation?.fps||60;if(now-last<1000/fps)return;last=now;let sec=(now-start)/1000,d=P.animation?.duration||8,t=P.animation?.loop===false?Math.min(sec,d):sec%d,s=sceneAt(t),sx=cv.width/P.canvas.w,sy=cv.height/P.canvas.h;x.setTransform(sx,0,0,sy,0,0);let bg=s.canvas||P.canvas;if(bg.bgMode==='gradient'){let g=x.createLinearGradient(0,0,P.canvas.w,P.canvas.h);g.addColorStop(0,bg.bg);g.addColorStop(1,bg.bg2);x.fillStyle=g}else x.fillStyle=bg.bg;x.fillRect(0,0,P.canvas.w,P.canvas.h);(s.layers||P.layers).forEach(l=>{if(!l.visible)return;if(l.type==='wave')wave(l);else if(l.type==='grid')grid(l);else if(l.type==='spot')spot(l);else if(l.type==='spectrum')spectrum(l,sec);else if(l.type==='clock')clock(l)})}requestAnimationFrame(frame);
+function globe(l,time){x.save();tr(l);x.globalCompositeOperation=l.blend;x.lineWidth=(l.width||1)*P.canvas.w/1920;x.shadowBlur=(l.glow||0)*P.canvas.w/1920;x.shadowColor=l.glowColor;x.strokeStyle=l.color;let R=Math.min(P.canvas.w,P.canvas.h)*(l.radius||.25),spin=((l.spin||0)+(l.autoRotate?time*(l.rotateSpeed||8):0))*Math.PI/180,tilt=(l.tilt||0)*Math.PI/180,proj=(la,lo)=>{let px=Math.cos(la)*Math.sin(lo+spin),py=Math.sin(la),pz=Math.cos(la)*Math.cos(lo+spin),ry=py*Math.cos(tilt)-pz*Math.sin(tilt),rz=py*Math.sin(tilt)+pz*Math.cos(tilt),q=1/Math.max(.35,1+rz*(l.perspective||0));return{x:px*R*q,y:ry*R*(l.flatten||1)*q,z:rz}};let trace=pts=>{for(let pass=0;pass<2;pass++){x.globalAlpha=l.opacity*(pass?(l.backOpacity||.18):1);x.beginPath();let active=false;pts.forEach(p=>{let wanted=pass?p.z>0:p.z<=0;if(wanted){active?x.lineTo(p.x,p.y):x.moveTo(p.x,p.y);active=true}else active=false});x.stroke()}};for(let i=1;i<(l.latitudes||12);i++){let pts=[],la=-Math.PI/2+Math.PI*i/l.latitudes;for(let s=0;s<=72;s++)pts.push(proj(la,Math.PI*2*s/72));trace(pts)}for(let i=0;i<(l.longitudes||20);i++){let pts=[],lo=Math.PI*2*i/l.longitudes;for(let s=0;s<=72;s++)pts.push(proj(-Math.PI/2+Math.PI*s/72,lo));trace(pts)}x.restore()}
+function resize(){let d=Math.min(2,devicePixelRatio||1);cv.width=Math.max(1,innerWidth*d);cv.height=Math.max(1,innerHeight*d)}addEventListener('resize',resize);resize();let last=0;function frame(now){requestAnimationFrame(frame);let fps=P.animation?.fps||60;if(now-last<1000/fps)return;last=now;let sec=(now-start)/1000,d=P.animation?.duration||8,t=P.animation?.loop===false?Math.min(sec,d):sec%d,s=sceneAt(t),sx=cv.width/P.canvas.w,sy=cv.height/P.canvas.h;x.setTransform(sx,0,0,sy,0,0);let bg=s.canvas||P.canvas;if(bg.bgMode==='gradient'){let g=x.createLinearGradient(0,0,P.canvas.w,P.canvas.h);g.addColorStop(0,bg.bg);g.addColorStop(1,bg.bg2);x.fillStyle=g}else x.fillStyle=bg.bg;x.fillRect(0,0,P.canvas.w,P.canvas.h);(s.layers||P.layers).forEach(l=>{if(!l.visible)return;if(l.type==='wave')wave(l);else if(l.type==='grid')grid(l);else if(l.type==='spot')spot(l);else if(l.type==='spectrum')spectrum(l,sec);else if(l.type==='clock')clock(l);else if(l.type==='globe')globe(l,sec)})}requestAnimationFrame(frame);
 <\/script></body></html>`;
 }
 

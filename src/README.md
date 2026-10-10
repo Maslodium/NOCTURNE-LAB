@@ -5,7 +5,7 @@ The v2 editor is built from the original self-contained editor plus a readable e
 ## Source layout
 
 - `wallpaper-studio.base.html` — original editor extracted from v1.
-- `nocturne-features.js` — grid bend handles, scene keyframes, spectrum and clock rendering, and Wallpaper Engine export.
+- `nocturne-features.js` — directional grid bend handles, scene keyframes, spectrum, clock and globe-grid rendering, and Wallpaper Engine export.
 - `WallpaperLauncher.cs` — .NET Framework launcher.
 - `wallpaper-studio.html` — generated file; do not edit it directly.
 
@@ -13,7 +13,9 @@ Run `..\build-wallpaper.ps1` after changing the base editor or extension module.
 
 ## Animation model
 
-A keyframe captures the complete scene. Numeric values and matching anchor arrays are interpolated between neighboring keys. Color values use RGB interpolation, while discrete properties switch halfway between keys. Smoothstep easing is enabled by default.
+A keyframe captures the complete scene. Numeric values and matching anchor arrays are interpolated between neighboring keys. Color values use RGB interpolation, while discrete properties switch halfway between keys. Motion is linear by default; the optional **Плавно** checkbox enables smoothstep easing.
+
+The editor starts with an empty canvas. Newly added geometry uses neutral transforms and zero bend/rotation. Every slider has a synchronized editable number field. The clock accepts an installed font name and can request the browser's local font list. Heavy wave and grid paths are cached, with reduced path detail while dragging.
 
 ## Wallpaper Engine export
 

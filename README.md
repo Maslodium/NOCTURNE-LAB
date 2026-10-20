@@ -1,8 +1,12 @@
 # NOCTURNE / LAB — Wallpaper Studio v2
 
-[![Скачать NOCTURNE Wallpaper Studio](https://img.shields.io/badge/Windows-Скачать_EXE-00d6d6?style=for-the-badge&logo=windows11&logoColor=black)](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)
+[![Скачать EXE](https://img.shields.io/badge/Windows-Скачать_EXE-00d6d6?style=for-the-badge&logo=windows11&logoColor=black)](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)
+[![Открыть HTML](https://img.shields.io/badge/Браузер-Скачать_HTML-c9ff42?style=for-the-badge&logo=javascript&logoColor=black)](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.html)
 
-**[Скачать последнюю версию для Windows](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)** — один автономный EXE, установка не требуется.
+Ядро редактора — автономный HTML/JavaScript с Canvas-рендерингом. Оно работает в современном браузере на Windows, Linux и macOS. Windows EXE — только удобный однокнопочный лаунчер, установка не требуется.
+
+- **[Windows EXE](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)**
+- **[Кроссплатформенный HTML](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.html)**
 
 Редактор анимированных обоев для Wallpaper Engine с аппаратно ускоряемым Canvas-рендерингом.
 
@@ -53,6 +57,7 @@
 - build-wallpaper.ps1 — воспроизводимая сборка EXE.
 
 ## Совместимость
-- Windows 10 и Windows 11.
-- Windows PowerShell 5.1 или PowerShell 7.
-- Wallpaper Engine Web wallpapers.
+- Современные браузеры на Windows, Linux и macOS — через автономный HTML.
+- Windows 10 и Windows 11 — через готовый EXE-лаунчер.
+- Windows PowerShell 5.1 или PowerShell 7 нужен только для локальной пересборки EXE.
+- Экспорт в Wallpaper Engine Web wallpapers выполняется из браузерной версии на любой ОС; запуск в Wallpaper Engine зависит от поддерживаемой платформы самого WPE.

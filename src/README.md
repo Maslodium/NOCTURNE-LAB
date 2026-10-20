@@ -6,7 +6,7 @@ The v2 editor is built from the original self-contained editor plus a readable e
 
 - `wallpaper-studio.base.html` — original editor extracted from v1.
 - `nocturne-features.js` — directional grid bend handles, scene keyframes, spectrum, clock and globe-grid rendering, and Wallpaper Engine export.
-- `WallpaperLauncher.cs` — .NET Framework launcher.
+- `WallpaperLauncher.cs` — optional Windows .NET Framework launcher. The editor itself is a self-contained browser application.
 - `wallpaper-studio.html` — generated file; do not edit it directly.
 
 Run `..\build-wallpaper.ps1` after changing the base editor or extension module. The build writes `wallpaper-studio.html` and compiles `..\dist\NOCTURNE-Wallpaper-Studio.exe`.

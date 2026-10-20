@@ -17,6 +17,8 @@ featureStyle.textContent = `
   .bend-hint { color:#a9ff68; }
   .value-edit { width:76px; height:25px; padding:2px 6px; text-align:right; font:11px ui-monospace,Consolas,monospace; }
   .font-row { display:grid; grid-template-columns:1fr auto; gap:6px; }
+  .project-name { width:180px; min-width:110px; height:29px; padding:4px 8px; color:#edf2f7; background:#11151b;
+    border:1px solid #343944; border-radius:4px; font:12px ui-monospace,Consolas,monospace; }
   .nothing-safe-area { position:absolute; z-index:4; inset:5.5% 5% 7.5%; display:none; pointer-events:none;
     border:1px dashed #a9ff6899; border-radius:22px; box-shadow:0 0 0 1px #0008 inset; }
   .nothing-safe-area::before { content:'NOTHING PHONE (3) · SAFE AREA'; position:absolute; left:50%; top:8px;
@@ -26,6 +28,27 @@ featureStyle.textContent = `
   @media(max-width:1000px){.animbar{grid-template-columns:auto auto 1fr 58px}.animbar .wide-hide{display:none}}
 `;
 document.head.appendChild(featureStyle);
+
+/* One editable project name drives every downloaded filename and the WPE title. */
+let projectName = 'nocturne-project';
+function cleanProjectName(value) {
+  return String(value || '').trim().replace(/[<>:"/\\|?*\x00-\x1F]/g, '-').replace(/[. ]+$/g, '').replace(/\s+/g, ' ').slice(0, 96) || 'nocturne-project';
+}
+function projectFileStem() { return cleanProjectName(projectName).replace(/\s+/g, '-'); }
+function setProjectName(value) {
+  projectName = cleanProjectName(value);
+  if (projectNameInput) projectNameInput.value = projectName;
+}
+function setProjectNameFromFile(filename) {
+  setProjectName(String(filename || '').replace(/\.nocturne(?:\s*\((\d+)\))?\.json$/i, (_, copy) => copy ? '-' + copy : '').replace(/\.json$/i, '').replace(/-wallpaper-engine$/i, ''));
+}
+const projectNameInput = document.createElement('input');
+projectNameInput.className = 'project-name'; projectNameInput.type = 'text'; projectNameInput.value = projectName;
+projectNameInput.placeholder = 'Имя проекта'; projectNameInput.title = 'Имя проекта и всех экспортируемых файлов';
+projectNameInput.setAttribute('aria-label', 'Имя проекта и экспортов');
+projectNameInput.onchange = () => setProjectName(projectNameInput.value);
+projectNameInput.oninput = () => { projectName = cleanProjectName(projectNameInput.value); };
+document.querySelector('header .grow')?.after(projectNameInput);
 
 /* Native Phone (3) canvas. The guide is editor-only and never appears in exports. */
 const resolutionSelect = document.querySelector('#res');
@@ -104,9 +127,11 @@ bind = function editableBind() {
 function ensureFeatureState() {
   if (!S.animation) S.animation = { duration: 8, time: 0, playing: false, loop: true, easing: 'linear', fps: 60, keyframes: [] };
   if (!['linear', 'smooth'].includes(S.animation.easing)) S.animation.easing = 'linear';
-  S.animation.duration = clamp(Number(S.animation.duration) || 8, 1, 120);
-  S.animation.time = clamp(Number(S.animation.time) || 0, 0, S.animation.duration);
   if (!Array.isArray(S.animation.keyframes)) S.animation.keyframes = [];
+  S.animation.keyframes.forEach(frame => { frame.time = clamp(Number(frame.time) || 0, 0, 600); });
+  const lastKeyTime = S.animation.keyframes.reduce((latest, frame) => Math.max(latest, frame.time), 0);
+  S.animation.duration = clamp(Math.max(Number(S.animation.duration) || 8, lastKeyTime), 1, 600);
+  S.animation.time = clamp(Number(S.animation.time) || 0, 0, S.animation.duration);
   S.layers.forEach(layer => {
     if (layer.type === 'grid') {
       if (!Array.isArray(layer.bendAnchors)) layer.bendAnchors = [];
@@ -802,7 +827,7 @@ const animationBar = document.createElement('div');
 animationBar.className = 'animbar';
 animationBar.innerHTML = '<button data-play title="Воспроизвести">▶</button><button data-key title="Записать состояние в текущей позиции">+ Ключ</button>' +
   '<div class="timeline-wrap"><input data-time type="range" min="0" max="8" step=".01" value="0"><div class="key-dots"></div></div>' +
-  '<div class="anim-time">0.00 s</div><label class="wide-hide">Длина <input data-duration type="number" min="1" max="120" step=".5" value="8" style="width:58px"></label>' +
+  '<div class="anim-time">0.00 s</div><label class="wide-hide">Длина <input data-duration type="number" min="1" max="600" step=".5" value="8" style="width:58px"></label>' +
   '<label class="wide-hide" title="Ускорение и замедление возле ключевых точек"><input data-easing type="checkbox"> Плавно</label>' +
   '<select data-fps class="wide-hide" title="Ограничение FPS"><option value="30">30 FPS</option><option value="60" selected>60 FPS</option></select>' +
   '<button data-export class="wide-hide">Wallpaper Engine</button>';
@@ -831,7 +856,7 @@ function refreshTimeline() {
   });
 }
 timeInput.oninput = () => { S.animation.playing = false; S.animation.time = +timeInput.value; sampleAnimation(S.animation.time); refreshTimeline(); sync(); };
-durationInput.onchange = () => { S.animation.duration = clamp(+durationInput.value || 8, 1, 120); S.animation.time = Math.min(S.animation.time, S.animation.duration); refreshTimeline(); };
+durationInput.onchange = () => { const lastKeyTime = S.animation.keyframes.reduce((latest, frame) => Math.max(latest, frame.time), 0); S.animation.duration = clamp(Math.max(+durationInput.value || 8, lastKeyTime), 1, 600); S.animation.time = Math.min(S.animation.time, S.animation.duration); refreshTimeline(); if (+durationInput.value < lastKeyTime) toast('Длина сохранена до последнего ключа: '+lastKeyTime.toFixed(2)+' s'); };
 animationBar.querySelector('[data-fps]').onchange = event => { S.animation.fps = +event.target.value; };
 animationBar.querySelector('[data-easing]').onchange = event => { S.animation.easing = event.target.checked ? 'smooth' : 'linear'; sampleAnimation(S.animation.time); draw(); };
 playButton.onclick = () => { if (S.animation.keyframes.length < 2) return toast('Добавьте минимум два ключа'); S.animation.playing = !S.animation.playing; refreshTimeline(); };
@@ -875,6 +900,7 @@ const originalProjectObject = projectObject;
 projectObject = function enhancedProjectObject() {
   const project = originalProjectObject();
   project.version = 2;
+  project.projectName = projectName;
   project.animation = cleanClone(S.animation);
   project.animation.playing = false;
   return project;
@@ -883,9 +909,11 @@ const originalRestoreProject = restoreProject;
 restoreProject = function enhancedRestoreProject(project) {
   const incoming = cleanClone(project);
   const animation = incoming.animation;
+  const incomingProjectName = incoming.projectName;
   incoming.version = 1;
   originalRestoreProject(incoming);
   S.animation = animation || { duration: 8, time: 0, playing: false, loop: true, easing: 'linear', fps: 60, keyframes: [] };
+  if (incomingProjectName) setProjectName(incomingProjectName);
   S.animation.playing = false;
   ensureFeatureState(); refreshTimeline(); updateDevicePreset(); sync();
 };
@@ -949,13 +977,14 @@ function resize(){let cap=R.quality==='eco'?1:R.quality==='high'?1.5:1.25,d=Math
 }
 
 function exportWallpaperEngine() {
+  setProjectName(projectNameInput.value);
   const project = projectObject();
   project.animation.playing = false;
   const index = wallpaperRuntimeHtml(project);
   const spectrumLayer = project.layers.find(layer => layer.type === 'spectrum') || normalizeSpectrum({});
   const nothingPhone3 = project.canvas.w === 1260 && project.canvas.h === 2800;
   const manifest = JSON.stringify({
-    file: 'index.html', type: 'web', title: nothingPhone3 ? 'NOCTURNE / LAB — Nothing Phone (3)' : 'NOCTURNE / LAB Animated Wallpaper',
+    file: 'index.html', type: 'web', title: projectName,
     description: 'Generated by NOCTURNE / LAB. Adaptive audio visualizer and mobile-safe layout.', preview: '', visibility: 'private',
     general: { supportsaudioprocessing: true, properties: {
       nocturneaudioheading: { order: 90, text: '<h3>Аудио и эквалайзер</h3>', type: 'text' },
@@ -1000,9 +1029,11 @@ function exportWallpaperEngine() {
       ] }
     } }
   }, null, 2);
-  const blob = zipStore({ 'index.html': index, 'project.json': manifest, 'README.txt': 'Распакуйте папку и перетащите index.html в Create Wallpaper в Wallpaper Engine.\r\nИсточник звука выбирается в Wallpaper Engine: Настройки > Основные > Медиа > Устройство записи аудио.\r\nПанель свойств обоев управляет аудио, чувствительностью спектра, адаптацией экрана и производительностью.\r\nAndroid: аудиовизуализаторы Wallpaper Engine работают после выдачи приложению разрешения на запись аудио. Прямой web-проект нельзя передать как нативные Scene-обои; для телефона используйте совместимый мобильный экспорт WPE.\r\nNothing Phone (3): 1260x2800. Для мобильного режима без аудиодоступа включите «Движение без аудиосигнала».\r\n' });
+  const applyScript = '@echo off\r\nsetlocal\r\nset "WPE=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" set "WPE=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" (echo Wallpaper Engine not found in the default Steam folder.&echo Import this folder through Wallpaper Engine: Open Wallpaper - Open offline wallpaper.&pause&exit /b 1)\r\nstart "" "%WPE%" -control openWallpaper -file "%~dp0project.json"\r\n';
+  const readme = '1. Сначала распакуйте ZIP целиком в отдельную папку. Не открывайте project.json прямо из архива.\r\n2. Запустите APPLY-WALLPAPER.cmd — он применит обои к рабочему столу через Wallpaper Engine.\r\n3. Если Steam установлен не в стандартную папку: Wallpaper Engine > Открыть обои > Открыть офлайн-обои и выберите index.html из этой папки.\r\n\r\nИсточник звука: Wallpaper Engine > Настройки > Основные > Медиа > Устройство записи аудио.\r\nПанель свойств обоев управляет каналом, чувствительностью спектра, адаптацией экрана и производительностью.\r\nAndroid: выдайте Wallpaper Engine разрешение на запись аудио.\r\nNothing Phone (3): 1260x2800. Для мобильного режима без аудиодоступа включите «Движение без аудиосигнала».\r\n';
+  const blob = zipStore({ 'index.html': index, 'project.json': manifest, 'APPLY-WALLPAPER.cmd': applyScript, 'README.txt': readme });
   const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob); link.download = 'nocturne-wallpaper-engine.zip'; link.click();
+  link.href = URL.createObjectURL(blob); link.download = projectFileStem() + '-wallpaper-engine.zip'; link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1500); toast('Проект Wallpaper Engine готов');
 }
 animationBar.querySelector('[data-export]').onclick = exportWallpaperEngine;

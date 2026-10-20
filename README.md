@@ -24,7 +24,7 @@
 - Адаптивное заполнение экрана без растягивания геометрии: cover, contain или stretch.
 
 ## Wallpaper Engine
-Кнопка «Wallpaper Engine» создаёт ZIP с автономными index.html и project.json. Распакуйте его и перетащите index.html в Create Wallpaper.
+Поле имени в шапке задаёт имя проекта, JSON, PNG, ZIP и заголовок обоев в Wallpaper Engine. Кнопка «Wallpaper Engine» создаёт ZIP с автономными `index.html`, `project.json` и `APPLY-WALLPAPER.cmd`. Сначала распакуйте ZIP целиком, затем запустите `APPLY-WALLPAPER.cmd`; либо выберите `index.html` через «Открыть офлайн-обои» в Wallpaper Engine.
 
 В свойствах готовых обоев доступны полноценные разделы:
 - аудио: канал, входное и автоматическое усиление, чувствительность, шумовой порог, атака, спад и баланс НЧ/ВЧ;

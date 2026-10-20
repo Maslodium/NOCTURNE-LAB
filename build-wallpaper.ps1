@@ -8,11 +8,17 @@ $root = $PSScriptRoot
 $source = Join-Path $root 'src'
 $basePath = Join-Path $source 'wallpaper-studio.base.html'
 $featurePath = Join-Path $source 'nocturne-features.js'
+$fontPath = Join-Path $source 'assets\Oxanium-wght.ttf'
 $generatedPath = Join-Path $source 'wallpaper-studio.html'
 $dist = Join-Path $root 'dist'
 
 $base = [IO.File]::ReadAllText($basePath, [Text.Encoding]::UTF8)
 $features = [IO.File]::ReadAllText($featurePath, [Text.Encoding]::UTF8)
+if (-not (Test-Path -LiteralPath $fontPath -PathType Leaf)) {
+    throw 'The bundled Oxanium UI font is missing.'
+}
+$fontBase64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes($fontPath))
+$features = $features.Replace('__NOCTURNE_UI_FONT_BASE64__', $fontBase64)
 $marker = "`$('#projectSave').onclick=saveProject;"
 $markerIndex = $base.IndexOf($marker, [StringComparison]::Ordinal)
 if ($markerIndex -lt 0) {

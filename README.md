@@ -1,6 +1,6 @@
 # NOCTURNE / LAB — Wallpaper Studio v2
 
-[![Скачать EXE](https://img.shields.io/badge/Windows-Скачать_EXE-00d6d6?style=for-the-badge&logo=windows11&logoColor=black)](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)
+[![Скачать EXE](https://img.shields.io/badge/Windows-Скачать_EXE-00E9FF?style=for-the-badge&logo=windows11&logoColor=black)](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)
 [![Открыть HTML](https://img.shields.io/badge/Браузер-Скачать_HTML-c9ff42?style=for-the-badge&logo=javascript&logoColor=black)](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.html)
 
 Ядро редактора — автономный HTML/JavaScript с Canvas-рендерингом. Оно работает в современном браузере на Windows, Linux и macOS. Windows EXE — только удобный однокнопочный лаунчер, установка не требуется.
@@ -23,9 +23,15 @@
 - Оптимизированный 4K-runtime: кэш статичных слоёв, пакетный Path2D и ограничение дорогого свечения.
 - Нативный холст **1260×2800** и безопасная зона для Nothing Phone (3).
 - Адаптивное заполнение экрана без растягивания геометрии: cover, contain или stretch.
+- Переработанный интерфейс с акцентом RGB 0, 233, 255 и встроенным шрифтом Oxanium, который не требует установки в системе.
+- Собственные разрешения холста с сохранением пользовательских пресетов.
 
 ## Wallpaper Engine
-Поле имени в шапке задаёт имя проекта, JSON, PNG, ZIP и заголовок обоев в Wallpaper Engine. Кнопка «Wallpaper Engine» создаёт ZIP с автономными `index.html`, `project.json` и `APPLY-WALLPAPER.cmd`. Сначала распакуйте ZIP целиком, затем запустите `APPLY-WALLPAPER.cmd`; либо выберите `index.html` через «Открыть офлайн-обои» в Wallpaper Engine.
+Поле имени в шапке задаёт имя проекта, JSON, PNG, ZIP и заголовок обоев в Wallpaper Engine. «WPE проект» сохраняет редактируемую папку, а «WPE ZIP» создаёт переносимый архив. Оба варианта содержат автономные `index.html`, `project.json`, автоматически снятый `preview.png`, `APPLY-WALLPAPER.cmd` и `INSTALL-PUBLISH.cmd`.
+
+- `APPLY-WALLPAPER.cmd` сразу применяет обои и запускает Wallpaper Engine из его собственной рабочей папки, поэтому кэш шейдеров не появляется на рабочем столе.
+- `INSTALL-PUBLISH.cmd` копирует проект в `wallpaper_engine\projects\myprojects`, после чего его можно открыть в редакторе и отправить через **Workshop → Share wallpaper on Workshop**.
+- Для телефона выберите установленные обои в WPE и нажмите **Send to Mobile Device**. Ручной запасной вариант: там же экспортируйте `.mpkg`, перенесите его в Downloads телефона и импортируйте в Android-приложении Wallpaper Engine.
 
 Перед сохранением старые проекты автоматически нормализуются: каждый ключ содержит все актуальные слои, поэтому поздно добавленные спектр, часы и другие элементы не исчезают между ключами.
 
@@ -38,7 +44,7 @@
 
 Физическое устройство перехвата выбирается глобально в Wallpaper Engine: **Настройки → Основные → Медиа → Устройство записи аудио**.
 
-> Wallpaper Engine для Android поддерживает аудиовизуализаторы после выдачи приложению разрешения на запись аудио. Однако NOCTURNE экспортирует Web-проект, а мобильная передача WPE рассчитана прежде всего на Scene/Video. Для Web-версии на Nothing Phone (3) доступен режим «Движение без аудиосигнала».
+> Wallpaper Engine для Android поддерживает аудиовизуализаторы после выдачи приложению разрешения на запись аудио. Для устройств, где Web-аудиовход недоступен, остаётся режим «Движение без аудиосигнала».
 
 ## Сборка
 
@@ -56,6 +62,7 @@
 - src\wallpaper-studio.base.html — базовый интерфейс редактора.
 - src\nocturne-features.js — функции v2 и runtime экспортируемых обоев.
 - src\WallpaperLauncher.cs — компактная Windows-обёртка.
+- src\assets\Oxanium-wght.ttf — встраиваемый интерфейсный шрифт под SIL Open Font License.
 - tools\repair-wallpaper-project.js — восстановление и оптимизация старых проектов.
 - build-wallpaper.ps1 — воспроизводимая сборка EXE.
 

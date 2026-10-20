@@ -2,9 +2,40 @@
 
 const featureStyle = document.createElement('style');
 featureStyle.textContent = `
-  .add { grid-template-columns: repeat(3,minmax(0,1fr)); }
+  @font-face { font-family:'Oxanium'; src:url(data:font/ttf;base64,__NOCTURNE_UI_FONT_BASE64__) format('truetype');
+    font-style:normal; font-weight:200 800; font-display:swap; }
+  :root { --a:#00e9ff; --p:#0c1117; --l:#253541; --m:#8398a5; --t:#eefcff; }
+  body, button, input, select { font-family:'Oxanium','Segoe UI',sans-serif; }
+  body { background:#070a0d; color:var(--t); }
+  .app { grid-template-rows:62px minmax(0,1fr); }
+  header { gap:10px; padding:7px 12px; overflow-x:auto; background:linear-gradient(180deg,#111820 0%,#0b1015 100%);
+    border-bottom:1px solid #1f333c; box-shadow:0 10px 30px #0005; }
+  .brand b { color:var(--a); text-shadow:0 0 18px #00e9ff66; }
+  .brand-wrap { display:flex; align-items:center; gap:12px; flex:0 0 auto; }
+  .toolbar-group { height:46px; display:flex; align-items:center; gap:6px; padding:5px 7px; border:1px solid #263844;
+    border-radius:8px; background:linear-gradient(180deg,#151e26,#10161c); flex:0 0 auto; }
+  .toolbar-group button,.toolbar-group .file,.toolbar-group select,.toolbar-group input { height:30px; }
+  .toolbar-label { align-self:flex-start; margin-right:1px; font-size:8px; line-height:10px; font-weight:800;
+    letter-spacing:.08em; text-transform:uppercase; color:#777f8c; }
+  .project-name-slot { display:flex; }
+  button,.file,select,input { border-color:#2b3b46; }
+  button,.file { background:linear-gradient(180deg,#1b2630,#121a21); color:#dcecf2; }
+  button:hover,.file:hover { border-color:#00e9ff99; background:linear-gradient(180deg,#21323d,#15232b); }
+  button.accent,.accent { border-color:#00e9ffaa; background:linear-gradient(180deg,#00e9ff,#00a9c1); color:#001115; font-weight:700; }
+  button.accent:hover,.accent:hover { border-color:#7ff5ff; background:linear-gradient(180deg,#48f1ff,#00bfd5); }
+  .swatch.active { border-color:#00e9ff; box-shadow:0 0 0 2px #00e9ff38,inset 0 0 0 1px #0004; }
+  .export-tools { border-color:#087b88; }
+  .export-tools .accent { min-width:58px; }
+  .shell { grid-template-columns:270px minmax(360px,1fr) 300px; }
+  .add { display:flex; flex-direction:column; gap:10px; padding:10px; }
+  .add-section { display:flex; flex-direction:column; gap:5px; }
+  .add-label { font-size:9px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:#737b88; }
+  .add-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:5px; }
+  .add-grid button,.add-grid .file { height:31px; padding:0 5px; }
+  .add-grid.import-grid { grid-template-columns:1fr; }
+  .actions button { font-size:11px; padding:0 5px; }
   .animbar { position:absolute; z-index:5; left:14px; right:14px; bottom:14px; min-height:48px;
-    display:grid; grid-template-columns:auto auto minmax(120px,1fr) 62px 75px auto auto; gap:7px;
+    display:grid; grid-template-columns:36px 72px minmax(120px,1fr) 56px auto auto 84px; gap:7px;
     align-items:center; padding:7px; border:1px solid #343944; border-radius:6px;
     background:#0d0f14e8; backdrop-filter:blur(10px); box-shadow:0 8px 30px #0008; }
   .animbar input[type=range] { min-width:80px; }
@@ -12,22 +43,63 @@ featureStyle.textContent = `
   .timeline-wrap { position:relative; min-width:0; }
   .timeline-wrap input { display:block; }
   .key-dots { position:absolute; inset:0 7px; pointer-events:none; }
-  .key-dot { position:absolute; top:50%; width:8px; height:8px; transform:translate(-50%,-50%) rotate(45deg);
-    background:#a9ff68; border:1px solid #071004; box-shadow:0 0 0 1px #a9ff6870; pointer-events:auto; cursor:pointer; }
-  .bend-hint { color:#a9ff68; }
+  .key-dot { position:absolute; top:50%; width:9px; height:9px; transform:translate(-50%,-50%) rotate(45deg);
+    background:#00e9ff; border:1px solid #001317; box-shadow:0 0 0 1px #00e9ff80,0 0 10px #00e9ff80; pointer-events:auto; cursor:grab; touch-action:none; z-index:2; }
+  .key-dot:active { cursor:grabbing; box-shadow:0 0 0 3px #00e9ff40,0 0 14px #00e9ff; }
+  .bend-hint { color:#00e9ff; }
   .value-edit { width:76px; height:25px; padding:2px 6px; text-align:right; font:11px ui-monospace,Consolas,monospace; }
   .font-row { display:grid; grid-template-columns:1fr auto; gap:6px; }
   .project-name { width:180px; min-width:110px; height:29px; padding:4px 8px; color:#edf2f7; background:#11151b;
     border:1px solid #343944; border-radius:4px; font:12px ui-monospace,Consolas,monospace; }
   .nothing-safe-area { position:absolute; z-index:4; inset:5.5% 5% 7.5%; display:none; pointer-events:none;
-    border:1px dashed #a9ff6899; border-radius:22px; box-shadow:0 0 0 1px #0008 inset; }
+    border:1px dashed #00e9ff99; border-radius:22px; box-shadow:0 0 0 1px #0008 inset; }
   .nothing-safe-area::before { content:'NOTHING PHONE (3) · SAFE AREA'; position:absolute; left:50%; top:8px;
     transform:translateX(-50%); padding:3px 7px; border-radius:3px; white-space:nowrap;
-    background:#080b0ddd; color:#a9ff68; font:10px ui-monospace,Consolas,monospace; letter-spacing:.08em; }
+    background:#080b0ddd; color:#00e9ff; font:10px 'Oxanium',sans-serif; letter-spacing:.08em; }
   .stage.nothing-phone-3 .nothing-safe-area { display:block; }
-  @media(max-width:1000px){.animbar{grid-template-columns:auto auto 1fr 58px}.animbar .wide-hide{display:none}}
+  .resolution-dialog { width:min(420px,calc(100vw - 32px)); border:1px solid #3a404c; border-radius:8px; color:#f3f5f7;
+    background:#111318; box-shadow:0 24px 80px #000b; padding:18px; }
+  .resolution-dialog::backdrop { background:#000a; backdrop-filter:blur(3px); }
+  .resolution-dialog h2 { margin:0 0 16px; font-size:15px; }
+  .resolution-dialog .resolution-fields { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .resolution-dialog label { display:flex; flex-direction:column; gap:6px; font-size:11px; color:#bdc2ca; }
+  .resolution-dialog input { width:100%; height:34px; border:1px solid #2a2e37; border-radius:5px; background:#191c22; padding:0 8px; }
+  .resolution-dialog .resolution-name { grid-column:1/-1; }
+  .resolution-dialog menu { display:flex; justify-content:flex-end; gap:8px; margin:18px 0 0; padding:0; }
+  @media(max-width:1500px){.tag,.toolbar-label{display:none}.project-name{width:150px}.toolbar-group{padding-inline:6px}}
+  @media(max-width:1250px){.tag,.toolbar-label{display:none}.project-name{width:140px}.shell{grid-template-columns:240px minmax(330px,1fr) 285px}}
+  @media(max-width:1000px){.animbar{grid-template-columns:36px 68px 1fr 54px}.animbar .wide-hide{display:none}}
+  @media(max-width:800px){.app{grid-template-rows:auto minmax(0,1fr)}header{flex-wrap:wrap;overflow:visible}.grow{display:none}.toolbar-group{flex:1 1 auto}.left{max-height:420px}}
 `;
 document.head.appendChild(featureStyle);
+
+/* Re-group the global toolbar before wiring its actions. */
+const appHeader = document.querySelector('header');
+appHeader.querySelector('.reslabel')?.remove();
+const brandWrap = document.createElement('div'); brandWrap.className = 'brand-wrap';
+brandWrap.append(appHeader.querySelector('.brand'), appHeader.querySelector('.tag'));
+appHeader.prepend(brandWrap);
+function toolbarGroup(className, label) {
+  const group = document.createElement('div'); group.className = 'toolbar-group ' + className;
+  const caption = document.createElement('span'); caption.className = 'toolbar-label'; caption.textContent = label;
+  group.appendChild(caption); return group;
+}
+const projectTools = toolbarGroup('project-tools', 'Проект');
+const projectNameSlot = document.createElement('span'); projectNameSlot.className = 'project-name-slot'; projectTools.appendChild(projectNameSlot);
+projectTools.append(document.querySelector('#projectSave'), document.querySelector('#projectOpen').closest('label'));
+const canvasTools = toolbarGroup('canvas-tools', 'Холст');
+const resolutionControl = document.querySelector('#res'), randomButton = document.querySelector('#random');
+canvasTools.append(resolutionControl, randomButton);
+randomButton.textContent = 'Случайная схема'; randomButton.title = 'Создать случайную композицию';
+const exportTools = toolbarGroup('export-tools', 'Экспорт');
+const pngExportButton = document.querySelector('#save'); pngExportButton.textContent = 'PNG'; exportTools.appendChild(pngExportButton);
+appHeader.append(projectTools, canvasTools, exportTools);
+document.querySelector('.left .title').textContent = 'Слои сцены';
+document.querySelector('.right .title').textContent = 'Параметры выбранного слоя';
+const downButton = document.querySelector('#down'), upButton = document.querySelector('#up'), deleteButton = document.querySelector('#del');
+downButton.textContent = '↓ Ниже'; downButton.title = 'Опустить выбранный слой'; downButton.setAttribute('aria-label', downButton.title);
+upButton.textContent = '↑ Выше'; upButton.title = 'Поднять выбранный слой'; upButton.setAttribute('aria-label', upButton.title);
+deleteButton.textContent = '× Удалить'; deleteButton.title = 'Удалить выбранный слой'; deleteButton.setAttribute('aria-label', deleteButton.title);
 
 /* One editable project name drives every downloaded filename and the WPE title. */
 let projectName = 'nocturne-project';
@@ -48,15 +120,48 @@ projectNameInput.placeholder = 'Имя проекта'; projectNameInput.title =
 projectNameInput.setAttribute('aria-label', 'Имя проекта и экспортов');
 projectNameInput.onchange = () => setProjectName(projectNameInput.value);
 projectNameInput.oninput = () => { projectName = cleanProjectName(projectNameInput.value); };
-document.querySelector('header .grow')?.after(projectNameInput);
+projectNameSlot.appendChild(projectNameInput);
 
 /* Native Phone (3) canvas. The guide is editor-only and never appears in exports. */
 const resolutionSelect = document.querySelector('#res');
+function addResolutionOption(width, height, label, custom = false) {
+  const value = width + 'x' + height;
+  let option = [...resolutionSelect.options].find(item => item.value === value);
+  const created = !option;
+  if (created) { option = document.createElement('option'); option.value = value; resolutionSelect.appendChild(option); }
+  if (created || label) option.textContent = value + (label ? ' · ' + label : '');
+  if (custom) option.dataset.custom = 'true';
+  return option;
+}
 if (resolutionSelect && ![...resolutionSelect.options].some(option => option.value === '1260x2800')) {
   const option = document.createElement('option');
   option.value = '1260x2800'; option.textContent = '1260x2800 · Nothing Phone (3)';
   resolutionSelect.appendChild(option);
 }
+let customResolutions = [];
+try { customResolutions = JSON.parse(localStorage.getItem('nocturne-custom-resolutions') || '[]'); } catch (error) {}
+customResolutions.filter(item => item && item.w && item.h).forEach(item => addResolutionOption(item.w, item.h, item.name, true));
+const resolutionButton = document.createElement('button'); resolutionButton.type = 'button'; resolutionButton.textContent = '+ Размер';
+resolutionButton.title = 'Добавить своё разрешение холста'; canvasTools.insertBefore(resolutionButton, document.querySelector('#random'));
+const resolutionDialog = document.createElement('dialog'); resolutionDialog.className = 'resolution-dialog';
+resolutionDialog.innerHTML = '<form method="dialog"><h2>Своё разрешение</h2><div class="resolution-fields">' +
+  '<label>Ширина, px<input name="width" type="number" min="64" max="16384" step="1" required value="1080"></label>' +
+  '<label>Высота, px<input name="height" type="number" min="64" max="16384" step="1" required value="2400"></label>' +
+  '<label class="resolution-name">Название<input name="name" maxlength="48" placeholder="Например: мой телефон"></label></div>' +
+  '<menu><button value="cancel">Отмена</button><button value="add" class="accent">Добавить</button></menu></form>';
+document.body.appendChild(resolutionDialog);
+resolutionButton.onclick = () => resolutionDialog.showModal();
+resolutionDialog.addEventListener('close', () => {
+  if (resolutionDialog.returnValue !== 'add') return;
+  const form = resolutionDialog.querySelector('form'), width = clamp(+form.elements.width.value || 0, 64, 16384);
+  const height = clamp(+form.elements.height.value || 0, 64, 16384), name = String(form.elements.name.value || '').trim();
+  if (!Number.isFinite(width) || !Number.isFinite(height)) return toast('Введите ширину и высоту');
+  const existing = customResolutions.find(item => item.w === width && item.h === height);
+  if (existing) existing.name = name || existing.name; else customResolutions.push({ w: width, h: height, name });
+  try { localStorage.setItem('nocturne-custom-resolutions', JSON.stringify(customResolutions)); } catch (error) {}
+  const option = addResolutionOption(width, height, name, true); resolutionSelect.value = option.value;
+  resolutionSelect.dispatchEvent(new Event('change')); toast('Холст: ' + width + '×' + height);
+});
 const nothingSafeArea = document.createElement('div');
 nothingSafeArea.className = 'nothing-safe-area';
 document.querySelector('#stage')?.appendChild(nothingSafeArea);
@@ -216,21 +321,33 @@ function normalizeGlobe(layer) {
 }
 
 const addArea = document.querySelector('.add');
+const geometrySection = document.createElement('div'); geometrySection.className = 'add-section';
+geometrySection.innerHTML = '<div class="add-label">Линии и сетки</div><div class="add-grid" data-add-geometry></div>';
+const widgetSection = document.createElement('div'); widgetSection.className = 'add-section';
+widgetSection.innerHTML = '<div class="add-label">Свет и виджеты</div><div class="add-grid" data-add-widgets></div>';
+const importSection = document.createElement('div'); importSection.className = 'add-section';
+importSection.innerHTML = '<div class="add-label">Импорт</div><div class="add-grid import-grid" data-add-import></div>';
+const waveButton = document.querySelector('#wave'), gridButton = document.querySelector('#grid'), spotButton = document.querySelector('#spot');
+const imageImport = document.querySelector('#file').closest('label'); imageImport.childNodes[0].textContent = '+ Изображение';
+geometrySection.querySelector('[data-add-geometry]').append(waveButton, gridButton);
+widgetSection.querySelector('[data-add-widgets]').appendChild(spotButton);
+importSection.querySelector('[data-add-import]').appendChild(imageImport);
+addArea.replaceChildren(geometrySection, widgetSection, importSection);
 const spectrumButton = document.createElement('button');
 spectrumButton.id = 'spectrum';
 spectrumButton.textContent = '+ Спектр';
 spectrumButton.title = 'Аудиоспектр Wallpaper Engine';
-addArea.insertBefore(spectrumButton, addArea.lastElementChild);
+widgetSection.querySelector('[data-add-widgets]').appendChild(spectrumButton);
 spectrumButton.onclick = () => add(Spectrum({ name: 'Спектр ' + (S.layers.filter(x => x.type === 'spectrum').length + 1) }));
 const clockButton = document.createElement('button');
 clockButton.id = 'clock';
 clockButton.textContent = '+ Часы';
 clockButton.title = 'Дата и время';
-addArea.insertBefore(clockButton, addArea.lastElementChild);
+widgetSection.querySelector('[data-add-widgets]').appendChild(clockButton);
 clockButton.onclick = () => add(Clock({ name: 'Часы ' + (S.layers.filter(x => x.type === 'clock').length + 1) }));
 const globeButton = document.createElement('button');
 globeButton.id = 'globe'; globeButton.textContent = '+ Глобус'; globeButton.title = 'Сферическая координатная сетка';
-addArea.insertBefore(globeButton, addArea.lastElementChild);
+geometrySection.querySelector('[data-add-geometry]').appendChild(globeButton);
 globeButton.onclick = () => add(Globe({ name: 'Глобус ' + (S.layers.filter(x => x.type === 'globe').length + 1) }));
 
 /* Two-dimensional Gaussian deformation for perspective grids. */
@@ -691,17 +808,18 @@ ui = function enhancedUi() {
   }
   if (layer.type === 'spectrum') {
     const styleOptions = ['bars', 'line', 'radial'].map(value => '<option value="' + value + '" ' + (layer.spectrumStyle === value ? 'selected' : '') + '>' + ({ bars: 'столбцы', line: 'линия', radial: 'радиальный' }[value]) + '</option>').join('');
-    panel.innerHTML = '<div class="group"><h3>Аудиоспектр</h3>' + color('Низкие частоты', 'color') + color('Высокие частоты', 'color2') +
+    panel.innerHTML = '<div class="group"><h3>Геометрия спектра</h3>' + color('Низкие частоты', 'color') + color('Высокие частоты', 'color2') +
       '<div class="row"><div class="label">Вид</div><select style="width:100%" data-key="spectrumStyle">' + styleOptions + '</select></div>' +
       row('Полосы', 'bars', 8, 64, 1) + row('Высота', 'height', .03, .65, .01, value => Math.round(value * 100) + '%') +
       row('Ширина', 'width', .1, 1.4, .01, value => Math.round(value * 100) + '%') + row('Зазор', 'gap', 0, .8, .01, value => Math.round(value * 100) + '%') +
+      row('Направление сектора', 'spectrumAngle', -180, 180, 1) + row('Размер сектора', 'spectrumArc', 5, 360, 1) +
+      '<div class="row"><label><input type="checkbox" data-spectrum-bool="mirror" ' + (layer.mirror ? 'checked' : '') + '> Зеркальное отражение</label></div></div>' +
+      '<div class="group"><h3>Аудиореактивность</h3>' +
       row('Чувствительность', 'sensitivity', .1, 4, .05, value => Number(value).toFixed(2)) + row('Усиление аудио', 'audioBoost', .25, 8, .05) +
       row('Шумовой порог', 'noiseGate', 0, .2, .005) + row('Общая инерция', 'smoothing', 0, .94, .01, value => Math.round(value * 100) + '%') +
       row('Атака', 'attack', 15, 300, 5, value => value + ' мс') + row('Спад', 'release', 40, 1200, 10, value => value + ' мс') +
       row('Низкие частоты', 'bassBoost', .25, 3, .05) + row('Высокие частоты', 'trebleBoost', .25, 3, .05) +
-      row('Направление сектора', 'spectrumAngle', -180, 180, 1) + row('Размер сектора', 'spectrumArc', 5, 360, 1) +
       '<div class="row"><label><input type="checkbox" data-spectrum-bool="autoGain" ' + (layer.autoGain ? 'checked' : '') + '> Автоусиление тихого сигнала</label></div>' +
-      '<div class="row"><label><input type="checkbox" data-spectrum-bool="mirror" ' + (layer.mirror ? 'checked' : '') + '> Зеркальное отражение</label></div>' +
       '<div class="row"><label><input type="checkbox" data-spectrum-bool="idleMotion" ' + (layer.idleMotion ? 'checked' : '') + '> Анимация без звука</label></div></div>' +
       styleGroup(layer) + '<div class="group"><h3>Положение</h3>' + row('Масштаб', 'scale', .1, 3, .01, value => Math.round(value * 100) + '%') +
       row('Поворот', 'rotation', -180, 180, 1, value => value + '°') + '<div class="pair"><div class="row"><div class="label">X</div><input style="width:100%" type="number" data-key="x" step=".01" value="' + layer.x.toFixed(2) + '"></div><div class="row"><div class="label">Y</div><input style="width:100%" type="number" data-key="y" step=".01" value="' + layer.y.toFixed(2) + '"></div></div></div>';
@@ -712,18 +830,19 @@ ui = function enhancedUi() {
     const fonts = window.nocturneLocalFonts || ['Segoe UI', 'Arial', 'Georgia', 'Times New Roman', 'Trebuchet MS', 'Verdana', 'Courier New', 'Consolas', 'Impact'];
     const fontOptions = fonts.map(font => '<option value="' + String(font).replace(/"/g, '&quot;') + '"></option>').join('');
     const weightOptions = [300, 400, 500, 600, 700, 800, 900].map(weight => '<option value="' + weight + '" ' + (+layer.fontWeight === weight ? 'selected' : '') + '>' + weight + '</option>').join('');
-    panel.innerHTML = '<div class="group"><h3>Дата и время</h3>' + color('Цвет времени', 'color') + color('Цвет даты', 'color2') +
-      '<div class="row"><div class="label">Шрифт с компьютера</div><div class="font-row"><input list="nocturne-fonts" data-key="fontFamily" value="' + String(layer.fontFamily).replace(/"/g, '&quot;') + '"><button type="button" data-load-fonts title="Запросить список установленных шрифтов">↻</button></div><datalist id="nocturne-fonts">' + fontOptions + '</datalist></div>' +
-      '<div class="row"><button type="button" data-font-file-button style="width:100%">Загрузить файл шрифта</button><input hidden data-font-file type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2">' + (layer.fontData ? '<div class="note">Встроен: ' + (layer.fontFileName || layer.fontFamily) + '</div>' : '') + '</div>' +
-      '<div class="row"><div class="label">Начертание</div><select style="width:100%" data-key="fontWeight">' + weightOptions + '</select></div>' +
-      row('Размер', 'fontSize', 24, 280, 1, value => value + ' px') + row('Интервал', 'letterSpacing', -4, 30, .5, value => value + ' px') +
-      row('Расстояние до даты', 'lineGap', .15, 1.2, .01, value => Math.round(value * 100) + '%') +
+    panel.innerHTML = '<div class="group"><h3>Содержимое часов</h3>' +
       '<div class="row"><div class="label">Формат времени</div><select style="width:100%" data-key="timeFormat"><option value="24" ' + (layer.timeFormat === '24' ? 'selected' : '') + '>24 часа</option><option value="12" ' + (layer.timeFormat === '12' ? 'selected' : '') + '>12 часов</option></select></div>' +
       '<div class="row"><div class="label">Формат даты</div><select style="width:100%" data-key="dateFormat"><option value="long" ' + (layer.dateFormat === 'long' ? 'selected' : '') + '>10 октября 2026</option><option value="weekday" ' + (layer.dateFormat === 'weekday' ? 'selected' : '') + '>с днём недели</option><option value="numeric" ' + (layer.dateFormat === 'numeric' ? 'selected' : '') + '>10.10.2026</option></select></div>' +
       '<div class="row"><div class="label">Язык</div><select style="width:100%" data-key="locale"><option value="ru-RU" ' + (layer.locale === 'ru-RU' ? 'selected' : '') + '>Русский</option><option value="en-US" ' + (layer.locale === 'en-US' ? 'selected' : '') + '>English</option><option value="de-DE" ' + (layer.locale === 'de-DE' ? 'selected' : '') + '>Deutsch</option></select></div>' +
       '<div class="row"><label><input type="checkbox" data-clock-bool="showSeconds" ' + (layer.showSeconds ? 'checked' : '') + '> Показывать секунды</label></div>' +
       '<div class="row"><label><input type="checkbox" data-clock-bool="showDate" ' + (layer.showDate ? 'checked' : '') + '> Показывать дату</label></div>' +
       '<div class="row"><label><input type="checkbox" data-clock-bool="uppercase" ' + (layer.uppercase ? 'checked' : '') + '> Верхний регистр</label></div></div>' +
+      '<div class="group"><h3>Типографика</h3>' + color('Цвет времени', 'color') + color('Цвет даты', 'color2') +
+      '<div class="row"><div class="label">Шрифт с компьютера</div><div class="font-row"><input list="nocturne-fonts" data-key="fontFamily" value="' + String(layer.fontFamily).replace(/"/g, '&quot;') + '"><button type="button" data-load-fonts title="Запросить список установленных шрифтов">↻</button></div><datalist id="nocturne-fonts">' + fontOptions + '</datalist></div>' +
+      '<div class="row"><button type="button" data-font-file-button style="width:100%">Загрузить файл шрифта</button><input hidden data-font-file type="file" accept=".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2">' + (layer.fontData ? '<div class="note">Встроен: ' + (layer.fontFileName || layer.fontFamily) + '</div>' : '') + '</div>' +
+      '<div class="row"><div class="label">Начертание</div><select style="width:100%" data-key="fontWeight">' + weightOptions + '</select></div>' +
+      row('Размер', 'fontSize', 24, 280, 1, value => value + ' px') + row('Интервал', 'letterSpacing', -4, 30, .5, value => value + ' px') +
+      row('Расстояние до даты', 'lineGap', .15, 1.2, .01, value => Math.round(value * 100) + '%') + '</div>' +
       '<div class="group"><h3>Свечение</h3>' + row('Свечение', 'glow', 0, 50, 1, value => value + ' px') + color('Цвет свечения', 'glowColor') + '</div>' +
       '<div class="group"><h3>Положение</h3>' + row('Масштаб', 'scale', .1, 3, .01, value => Math.round(value * 100) + '%') + row('Поворот', 'rotation', -180, 180, 1, value => value + '°') +
       '<div class="pair"><div class="row"><div class="label">X</div><input style="width:100%" type="number" data-key="x" step=".01" value="' + layer.x.toFixed(2) + '"></div><div class="row"><div class="label">Y</div><input style="width:100%" type="number" data-key="y" step=".01" value="' + layer.y.toFixed(2) + '"></div></div></div>';
@@ -756,8 +875,8 @@ ui = function enhancedUi() {
     panel.innerHTML = '<div class="group"><h3>Глобус-сетка</h3>' + color('Основной цвет', 'color') + color('Второй цвет', 'color2') +
       row('Широты', 'latitudes', 3, 48, 1) + row('Долготы', 'longitudes', 4, 72, 1) + row('Радиус', 'radius', .05, .7, .01) +
       row('Сплющивание', 'flatten', .2, 2, .01) + row('Наклон', 'tilt', -90, 90, 1) + row('Поворот сферы', 'spin', -180, 180, 1) +
-      row('Перспектива', 'perspective', 0, .8, .01) + row('Задняя полусфера', 'backOpacity', 0, 1, .01) +
-      '<div class="row"><label><input type="checkbox" data-globe-auto ' + (layer.autoRotate ? 'checked' : '') + '> Автовращение</label></div>' + row('Скорость вращения', 'rotateSpeed', -60, 60, 1) + '</div>' +
+      row('Перспектива', 'perspective', 0, .8, .01) + row('Задняя полусфера', 'backOpacity', 0, 1, .01) + '</div>' +
+      '<div class="group"><h3>Анимация глобуса</h3><div class="row"><label><input type="checkbox" data-globe-auto ' + (layer.autoRotate ? 'checked' : '') + '> Автовращение</label></div>' + row('Скорость вращения', 'rotateSpeed', -60, 60, 1) + '</div>' +
       styleGroup(layer) + '<div class="group"><h3>Положение</h3>' + row('Масштаб', 'scale', .1, 3, .01) + row('Поворот слоя', 'rotation', -180, 180, 1) +
       '<div class="pair"><div class="row"><div class="label">X</div><input style="width:100%" type="number" data-key="x" step=".01" value="' + layer.x.toFixed(2) + '"></div><div class="row"><div class="label">Y</div><input style="width:100%" type="number" data-key="y" step=".01" value="' + layer.y.toFixed(2) + '"></div></div></div>';
     bind();
@@ -853,8 +972,7 @@ animationBar.innerHTML = '<button data-play title="Воспроизвести">�
   '<div class="timeline-wrap"><input data-time type="range" min="0" max="8" step=".01" value="0"><div class="key-dots"></div></div>' +
   '<div class="anim-time">0.00 s</div><label class="wide-hide">Длина <input data-duration type="number" min="1" max="600" step=".5" value="8" style="width:58px"></label>' +
   '<label class="wide-hide" title="Ускорение и замедление возле ключевых точек"><input data-easing type="checkbox"> Плавно</label>' +
-  '<select data-fps class="wide-hide" title="Ограничение FPS"><option value="30">30 FPS</option><option value="60" selected>60 FPS</option></select>' +
-  '<button data-export class="wide-hide">Wallpaper Engine</button>';
+  '<select data-fps class="wide-hide" title="Ограничение FPS"><option value="30">30 FPS</option><option value="60" selected>60 FPS</option></select>';
 document.querySelector('main').appendChild(animationBar);
 
 const timeInput = animationBar.querySelector('[data-time]');
@@ -887,12 +1005,14 @@ function refreshTimeline() {
         dot.title = 'Ключ ' + frame.time.toFixed(2) + ' s · перетащите для изменения времени';
         timeInput.value = frame.time; animationBar.querySelector('.anim-time').textContent = frame.time.toFixed(2) + ' s';
       };
-      const up = () => {
-        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+      const up = eventUp => {
+        dot.removeEventListener('pointermove', move); dot.removeEventListener('pointerup', up); dot.removeEventListener('pointercancel', up);
+        if (dot.hasPointerCapture?.(event.pointerId)) dot.releasePointerCapture(event.pointerId);
         S.animation.keyframes.sort((a, b) => a.time - b.time); sampleAnimation(frame.time); refreshTimeline(); sync();
         if (dragged) toast('Ключ перенесён: ' + frame.time.toFixed(2) + ' s');
       };
-      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true });
+      dot.setPointerCapture?.(event.pointerId); dot.addEventListener('pointermove', move); dot.addEventListener('pointerup', up);
+      dot.addEventListener('pointercancel', up);
     };
     dot.onclick = () => { if (dragged) return; S.animation.time = frame.time; sampleAnimation(frame.time); refreshTimeline(); sync(); };
     dot.oncontextmenu = event => { event.preventDefault(); S.animation.keyframes.splice(index, 1); refreshTimeline(); toast('Ключ удалён'); };
@@ -921,7 +1041,7 @@ function featureTick(now) {
   const hasClock = S.layers.some(layer => layer.visible && layer.type === 'clock');
   const hasRotatingGlobe = S.layers.some(layer => layer.visible && layer.type === 'globe' && layer.autoRotate);
   const reactive = hasSpectrum || hasClock || hasRotatingGlobe;
-  const targetFrame = animated || hasSpectrum ? 1 / (S.animation.fps || 60) : 1;
+  const targetFrame = animated || hasSpectrum || hasRotatingGlobe ? 1 / (S.animation.fps || 60) : 1;
   accumulatedFrameTime += delta;
   if ((animated || reactive) && accumulatedFrameTime >= targetFrame) {
     accumulatedFrameTime %= targetFrame;
@@ -946,6 +1066,8 @@ projectObject = function enhancedProjectObject() {
   const project = originalProjectObject();
   project.version = 2;
   project.projectName = projectName;
+  const selectedResolution = resolutionSelect.selectedOptions[0]?.textContent || '';
+  project.canvas.presetName = selectedResolution.includes('·') ? selectedResolution.split('·').slice(1).join('·').trim() : '';
   project.animation = cleanClone(S.animation);
   project.animation.playing = false;
   return project;
@@ -957,6 +1079,7 @@ restoreProject = function enhancedRestoreProject(project) {
   const incomingProjectName = incoming.projectName;
   incoming.version = 1;
   originalRestoreProject(incoming);
+  const restoredOption = addResolutionOption(S.w, S.h, incoming.canvas?.presetName || '', false); resolutionSelect.value = restoredOption.value;
   S.animation = animation || { duration: 8, time: 0, playing: false, loop: true, easing: 'linear', fps: 60, keyframes: [] };
   if (incomingProjectName) setProjectName(incomingProjectName);
   S.animation.playing = false;
@@ -976,8 +1099,8 @@ function zipStore(files) {
   let offset = 0;
   const u16 = value => new Uint8Array([value & 255, value >>> 8 & 255]);
   const u32 = value => new Uint8Array([value & 255, value >>> 8 & 255, value >>> 16 & 255, value >>> 24 & 255]);
-  Object.entries(files).forEach(([name, text]) => {
-    const filename = encoder.encode(name), data = encoder.encode(text), checksum = crc32(data);
+  Object.entries(files).forEach(([name, content]) => {
+    const filename = encoder.encode(name), data = content instanceof Uint8Array ? content : encoder.encode(String(content)), checksum = crc32(data);
     const local = [u32(0x04034b50), u16(20), u16(0x800), u16(0), u16(0), u16(0), u32(checksum), u32(data.length), u32(data.length), u16(filename.length), u16(0), filename, data];
     const localSize = local.reduce((sum, part) => sum + part.length, 0);
     parts.push(...local);
@@ -1022,7 +1145,16 @@ function resize(){let cap=R.quality==='eco'?1:R.quality==='high'?1.5:1.25,d=Math
 <\/script></body></html>`;
 }
 
-function exportWallpaperEngine() {
+function createWallpaperPreview() {
+  render();
+  const limit = 512, ratio = Math.min(1, limit / Math.max(cv.width, cv.height));
+  const preview = document.createElement('canvas'); preview.width = Math.max(1, Math.round(cv.width * ratio)); preview.height = Math.max(1, Math.round(cv.height * ratio));
+  const context = preview.getContext('2d', { alpha: false }); context.fillStyle = '#000'; context.fillRect(0, 0, preview.width, preview.height);
+  context.drawImage(cv, 0, 0, preview.width, preview.height);
+  return new Promise((resolve, reject) => preview.toBlob(async blob => blob ? resolve(new Uint8Array(await blob.arrayBuffer())) : reject(new Error('Не удалось создать превью')), 'image/png'));
+}
+
+async function buildWallpaperEnginePackage() {
   setProjectName(projectNameInput.value);
   const project = projectObject();
   project.animation.playing = false;
@@ -1031,7 +1163,8 @@ function exportWallpaperEngine() {
   const nothingPhone3 = project.canvas.w === 1260 && project.canvas.h === 2800;
   const manifest = JSON.stringify({
     file: 'index.html', type: 'web', title: projectName,
-    description: 'Generated by NOCTURNE / LAB. Adaptive audio visualizer and mobile-safe layout.', preview: '', visibility: 'private',
+    description: 'Generated by NOCTURNE / LAB. Adaptive audio visualizer and mobile-safe layout.', preview: 'preview.png',
+    tags: ['Technology', 'Music'], visibility: 'private',
     general: { supportsaudioprocessing: true, properties: {
       nocturneaudioheading: { order: 90, text: '<h3>Аудио и эквалайзер</h3>', type: 'text' },
       nocturneaudiochannel: { index: 0, order: 100, text: 'Канал перехвата', type: 'combo', value: 'stereo', options: [
@@ -1075,14 +1208,44 @@ function exportWallpaperEngine() {
       ] }
     } }
   }, null, 2);
-  const applyScript = '@echo off\r\nsetlocal\r\nset "WPE=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" set "WPE=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" (echo Wallpaper Engine not found in the default Steam folder.&echo Import this folder through Wallpaper Engine: Open Wallpaper - Open offline wallpaper.&pause&exit /b 1)\r\nstart "" "%WPE%" -control openWallpaper -file "%~dp0project.json"\r\n';
-  const readme = '1. Сначала распакуйте ZIP целиком в отдельную папку. Не открывайте project.json прямо из архива.\r\n2. Запустите APPLY-WALLPAPER.cmd — он применит обои к рабочему столу через Wallpaper Engine.\r\n3. Если Steam установлен не в стандартную папку: Wallpaper Engine > Открыть обои > Открыть офлайн-обои и выберите index.html из этой папки.\r\n\r\nИсточник звука: Wallpaper Engine > Настройки > Основные > Медиа > Устройство записи аудио.\r\nПанель свойств обоев управляет каналом, чувствительностью спектра, адаптацией экрана и производительностью.\r\nAndroid: выдайте Wallpaper Engine разрешение на запись аудио.\r\nNothing Phone (3): 1260x2800. Для мобильного режима без аудиодоступа включите «Движение без аудиосигнала».\r\n';
-  const blob = zipStore({ 'index.html': index, 'project.json': manifest, 'APPLY-WALLPAPER.cmd': applyScript, 'README.txt': readme });
-  const link = document.createElement('a');
-  link.href = URL.createObjectURL(blob); link.download = projectFileStem() + '-wallpaper-engine.zip'; link.click();
-  setTimeout(() => URL.revokeObjectURL(link.href), 1500); toast('Проект Wallpaper Engine готов');
+  const applyScript = '@echo off\r\nsetlocal\r\nset "WPE=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" set "WPE=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" (echo Wallpaper Engine not found in the default Steam folder.&echo Import this folder through Wallpaper Engine: Open Wallpaper - Open offline wallpaper.&pause&exit /b 1)\r\nfor %%I in ("%WPE%") do set "WPE_DIR=%%~dpI"\r\npushd "%WPE_DIR%"\r\nstart "" /D "%WPE_DIR%" "%WPE%" -control openWallpaper -file "%~dp0project.json"\r\npopd\r\n';
+  const safeBatchName = projectFileStem().replace(/%/g, '%%').replace(/!/g, '').replace(/[&()^]/g, '-');
+  const publishScript = '@echo off\r\nsetlocal\r\nset "WPE_DIR=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" set "WPE_DIR=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" (echo Wallpaper Engine not found in the default Steam folder.&pause&exit /b 1)\r\nset "DEST=%WPE_DIR%\\projects\\myprojects\\' + safeBatchName + '"\r\nif not exist "%DEST%" mkdir "%DEST%"\r\nrobocopy "%~dp0." "%DEST%" /E /R:1 /W:1 /XF INSTALL-PUBLISH.cmd >nul\r\nif errorlevel 8 (echo Could not install the project.&pause&exit /b 1)\r\npushd "%WPE_DIR%"\r\nstart "" /D "%WPE_DIR%" "%WPE_DIR%\\launcher.exe"\r\npopd\r\necho Project installed to:\r\necho %DEST%\r\necho Open Wallpaper Engine editor, then Workshop - Share wallpaper on Workshop.\r\necho To transfer it to Android: select the wallpaper - Send to Mobile Device.\r\npause\r\n';
+  const readme = 'Готовый редактируемый проект Wallpaper Engine. Если это ZIP — сначала распакуйте его целиком.\r\n1. INSTALL-PUBLISH.cmd копирует проект в wallpaper_engine\\projects\\myprojects и запускает Wallpaper Engine. Затем откройте редактор: Workshop > Share wallpaper on Workshop.\r\n2. APPLY-WALLPAPER.cmd сразу применяет обои к рабочему столу.\r\n3. preview.png — автоматически созданная обложка проекта.\r\n\r\nТелефон: в Wallpaper Engine для Windows выберите обои > Send to Mobile Device. Для ручной передачи выберите Export .mpkg и импортируйте файл из Downloads на Android.\r\nИсточник звука: Wallpaper Engine > Настройки > Основные > Медиа > Устройство записи аудио.\r\nПанель свойств обоев управляет каналом, чувствительностью спектра, адаптацией экрана и производительностью.\r\nAndroid: выдайте Wallpaper Engine разрешение на запись аудио.\r\nДля мобильного режима без аудиодоступа включите «Движение без аудиосигнала».\r\n';
+  const preview = await createWallpaperPreview();
+  return { 'index.html': index, 'project.json': manifest, 'preview.png': preview, 'APPLY-WALLPAPER.cmd': applyScript, 'INSTALL-PUBLISH.cmd': publishScript, 'README.txt': readme };
 }
-animationBar.querySelector('[data-export]').onclick = exportWallpaperEngine;
+
+async function exportWallpaperZip() {
+  try {
+    const files = await buildWallpaperEnginePackage(), blob = zipStore(files);
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob); link.download = projectFileStem() + '-wallpaper-engine.zip'; link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1500); toast('ZIP Wallpaper Engine готов, превью вложено');
+  } catch (error) { toast(error.message || 'Не удалось собрать ZIP'); }
+}
+
+async function exportWallpaperFolder() {
+  if (typeof window.showDirectoryPicker !== 'function') return exportWallpaperZip();
+  try {
+    const parent = await window.showDirectoryPicker({ mode: 'readwrite', id: 'nocturne-wallpaper-export' });
+    const directory = await parent.getDirectoryHandle(projectFileStem() + '-wallpaper-engine', { create: true });
+    const files = await buildWallpaperEnginePackage();
+    for (const [name, content] of Object.entries(files)) {
+      const handle = await directory.getFileHandle(name, { create: true }), writable = await handle.createWritable();
+      await writable.write(content instanceof Uint8Array ? content : new Blob([content], { type: name.endsWith('.json') ? 'application/json' : 'text/plain;charset=utf-8' }));
+      await writable.close();
+    }
+    toast('Папка Wallpaper Engine готова, превью вложено');
+  } catch (error) { if (error.name !== 'AbortError') toast(error.message || 'Не удалось записать папку'); }
+}
+
+const wallpaperFolderButton = document.createElement('button'); wallpaperFolderButton.type = 'button'; wallpaperFolderButton.textContent = 'WPE проект';
+wallpaperFolderButton.title = 'Сохранить редактируемый проект для публикации в Workshop';
+wallpaperFolderButton.title = 'Записать готовый проект Wallpaper Engine прямо в выбранную папку'; wallpaperFolderButton.onclick = exportWallpaperFolder;
+const wallpaperZipButton = document.createElement('button'); wallpaperZipButton.type = 'button'; wallpaperZipButton.textContent = 'WPE ZIP';
+wallpaperZipButton.title = 'Скачать переносимый ZIP Wallpaper Engine'; wallpaperZipButton.onclick = exportWallpaperZip;
+exportTools.append(wallpaperFolderButton, wallpaperZipButton);
 
 ensureFeatureState();
 refreshTimeline();

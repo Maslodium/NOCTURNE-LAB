@@ -13,7 +13,7 @@ Run `..\build-wallpaper.ps1` after changing the base editor or extension module.
 
 ## Animation model
 
-A keyframe captures the complete scene. Numeric values and matching anchor arrays are interpolated between neighboring keys. Color values use RGB interpolation, while discrete properties switch halfway between keys. Motion is linear by default; the optional **Плавно** checkbox enables smoothstep easing.
+A keyframe captures the complete scene. Legacy or incomplete keyframes are normalized against the current layer set before saving and export, preventing layers added later from disappearing during playback. Numeric values and matching anchor arrays are interpolated between neighboring keys. Color values use RGB interpolation, while discrete properties switch halfway between keys. Motion is linear by default; the optional **Плавно** checkbox enables smoothstep easing. Key markers can be dragged, removed with the context menu, and are proportionally rescaled when the timeline duration changes.
 
 The editor starts with an empty canvas. Newly added geometry uses neutral transforms and zero bend/rotation. Every slider has a synchronized editable number field. The clock accepts an installed font name, can request the browser's local font list, or embed TTF/OTF/WOFF/WOFF2 data into the project. Heavy wave and grid paths are cached, with reduced path detail while dragging. Radial spectrum layers support a directed arc sector.
 

@@ -783,6 +783,21 @@ function captureSceneState() {
     layers: S.layers.map(layer => cleanClone(layer))
   };
 }
+function completeSceneState(state) {
+  const source = state || {};
+  const byId = new Map((source.layers || []).map(layer => [layer.id, layer]));
+  return {
+    canvas: Object.assign({ bg: S.bg, bg2: S.bg2, bgMode: S.bgMode, bgAngle: S.bgAngle }, cleanClone(source.canvas || {})),
+    layers: S.layers.map(layer => Object.assign(cleanClone(layer), cleanClone(byId.get(layer.id) || {})))
+  };
+}
+function normalizeKeyframeStates() {
+  if (!S.animation?.keyframes) return;
+  S.animation.keyframes = S.animation.keyframes
+    .filter(frame => frame && Number.isFinite(Number(frame.time)))
+    .map(frame => ({ time: clamp(Number(frame.time), 0, 600), state: completeSceneState(frame.state) }))
+    .sort((a, b) => a.time - b.time);
+}
 function lerpColor(a, b, amount) {
   if (!/^#[0-9a-f]{6}$/i.test(a || '') || !/^#[0-9a-f]{6}$/i.test(b || '')) return amount < .5 ? a : b;
   const A = rgb(a), B = rgb(b);
@@ -822,6 +837,15 @@ function sampleAnimation(time) {
   if (S.animation.easing === 'smooth') amount = amount * amount * (3 - 2 * amount);
   applySceneState(interpolateValue(left.state, right.state, amount));
 }
+function rescaleTimeline(newDuration) {
+  const oldDuration = clamp(Number(S.animation.duration) || 8, 1, 600);
+  const nextDuration = clamp(Number(newDuration) || oldDuration, 1, 600);
+  const ratio = nextDuration / oldDuration;
+  S.animation.keyframes.forEach(frame => { frame.time = Math.round(clamp(frame.time * ratio, 0, nextDuration) * 10000) / 10000; });
+  S.animation.time = clamp(S.animation.time * ratio, 0, nextDuration);
+  S.animation.duration = nextDuration;
+  S.animation.keyframes.sort((a, b) => a.time - b.time);
+}
 
 const animationBar = document.createElement('div');
 animationBar.className = 'animbar';
@@ -848,15 +872,35 @@ function refreshTimeline() {
   const dots = animationBar.querySelector('.key-dots');
   dots.innerHTML = '';
   S.animation.keyframes.forEach((frame, index) => {
-    const dot = document.createElement('button'); dot.className = 'key-dot'; dot.title = 'Ключ ' + frame.time.toFixed(2) + ' s';
+    const dot = document.createElement('button'); dot.className = 'key-dot'; dot.title = 'Ключ ' + frame.time.toFixed(2) + ' s · перетащите для изменения времени';
     dot.style.left = (frame.time / S.animation.duration * 100) + '%';
-    dot.onclick = () => { S.animation.time = frame.time; sampleAnimation(frame.time); refreshTimeline(); sync(); };
+    let dragged = false;
+    dot.onpointerdown = event => {
+      if (event.button !== 0) return;
+      event.preventDefault(); event.stopPropagation(); dragged = false; S.animation.playing = false;
+      const rect = timeInput.getBoundingClientRect();
+      const move = pointer => {
+        const previous = frame.time;
+        frame.time = Math.round(clamp((pointer.clientX - rect.left) / Math.max(1, rect.width) * S.animation.duration, 0, S.animation.duration) * 100) / 100;
+        dragged ||= Math.abs(frame.time - previous) > .001;
+        S.animation.time = frame.time; dot.style.left = (frame.time / S.animation.duration * 100) + '%';
+        dot.title = 'Ключ ' + frame.time.toFixed(2) + ' s · перетащите для изменения времени';
+        timeInput.value = frame.time; animationBar.querySelector('.anim-time').textContent = frame.time.toFixed(2) + ' s';
+      };
+      const up = () => {
+        window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up);
+        S.animation.keyframes.sort((a, b) => a.time - b.time); sampleAnimation(frame.time); refreshTimeline(); sync();
+        if (dragged) toast('Ключ перенесён: ' + frame.time.toFixed(2) + ' s');
+      };
+      window.addEventListener('pointermove', move); window.addEventListener('pointerup', up, { once: true });
+    };
+    dot.onclick = () => { if (dragged) return; S.animation.time = frame.time; sampleAnimation(frame.time); refreshTimeline(); sync(); };
     dot.oncontextmenu = event => { event.preventDefault(); S.animation.keyframes.splice(index, 1); refreshTimeline(); toast('Ключ удалён'); };
     dots.appendChild(dot);
   });
 }
 timeInput.oninput = () => { S.animation.playing = false; S.animation.time = +timeInput.value; sampleAnimation(S.animation.time); refreshTimeline(); sync(); };
-durationInput.onchange = () => { const lastKeyTime = S.animation.keyframes.reduce((latest, frame) => Math.max(latest, frame.time), 0); S.animation.duration = clamp(Math.max(+durationInput.value || 8, lastKeyTime), 1, 600); S.animation.time = Math.min(S.animation.time, S.animation.duration); refreshTimeline(); if (+durationInput.value < lastKeyTime) toast('Длина сохранена до последнего ключа: '+lastKeyTime.toFixed(2)+' s'); };
+durationInput.onchange = () => { const before = S.animation.duration; rescaleTimeline(durationInput.value); sampleAnimation(S.animation.time); refreshTimeline(); sync(); toast('Таймлайн: ' + before.toFixed(2) + ' → ' + S.animation.duration.toFixed(2) + ' s; ключи масштабированы'); };
 animationBar.querySelector('[data-fps]').onchange = event => { S.animation.fps = +event.target.value; };
 animationBar.querySelector('[data-easing]').onchange = event => { S.animation.easing = event.target.checked ? 'smooth' : 'linear'; sampleAnimation(S.animation.time); draw(); };
 playButton.onclick = () => { if (S.animation.keyframes.length < 2) return toast('Добавьте минимум два ключа'); S.animation.playing = !S.animation.playing; refreshTimeline(); };
@@ -898,6 +942,7 @@ requestAnimationFrame(featureTick);
 /* Include v2 data in saved projects while still accepting v1 projects. */
 const originalProjectObject = projectObject;
 projectObject = function enhancedProjectObject() {
+  normalizeKeyframeStates();
   const project = originalProjectObject();
   project.version = 2;
   project.projectName = projectName;
@@ -915,7 +960,7 @@ restoreProject = function enhancedRestoreProject(project) {
   S.animation = animation || { duration: 8, time: 0, playing: false, loop: true, easing: 'linear', fps: 60, keyframes: [] };
   if (incomingProjectName) setProjectName(incomingProjectName);
   S.animation.playing = false;
-  ensureFeatureState(); refreshTimeline(); updateDevicePreset(); sync();
+  ensureFeatureState(); normalizeKeyframeStates(); refreshTimeline(); updateDevicePreset(); sync();
 };
 
 function crc32(bytes) {
@@ -956,7 +1001,8 @@ function registerWallpaperAudio(){if(!audioRegistered&&typeof window.wallpaperRe
 registerWallpaperAudio();if(!audioRegistered){let audioRegisterTimer=setInterval(()=>{if(registerWallpaperAudio())clearInterval(audioRegisterTimer)},100)}
 window.wallpaperPropertyListener={applyUserProperties:function(p){let number=(key,target,min,max,scale=1)=>{if(p[key])R[target]=clamp(Number(p[key].value)*scale,min,max)};if(p.nocturneaudiochannel)R.channel=String(p.nocturneaudiochannel.value||'stereo');number('nocturnegain','gain',.25,8);number('nocturneaudiogain','gain',.25,8);number('nocturnesensitivity','sensitivity',.1,12);number('nocturnegate','gate',0,.4);number('nocturnesmoothing','smoothing',0,.96);number('nocturneattack','attack',12,500);number('nocturnerelease','release',30,1600);number('nocturnebass','bass',.25,4);number('nocturnetreble','treble',.25,4);number('nocturnebars','bars',8,64);number('nocturnewidth','width',.25,2.5,.01);number('nocturneheight','height',.25,2.5,.01);number('nocturneoffsetx','offsetX',-.5,.5,.01);number('nocturneoffsety','offsetY',-.5,.5,.01);number('nocturneglow','glow',0,2.5,.01);if(p.nocturnestyle)R.style=String(p.nocturnestyle.value||'project');if(p.nocturnemirror)R.mirror=!!p.nocturnemirror.value;if(p.nocturneautogain)R.autoGain=!!p.nocturneautogain.value;if(p.nocturneidlemotion)R.idle=!!p.nocturneidlemotion.value;if(p.nocturneaudiostatus)R.status=!!p.nocturneaudiostatus.value;if(p.nocturnefit)R.fit=String(p.nocturnefit.value||'cover');if(p.nocturnequality){R.quality=String(p.nocturnequality.value||'balanced');resize()}if(p.nocturnefps)R.fps=Number(p.nocturnefps.value)||0}};
 function clone(v){return JSON.parse(JSON.stringify(v))}function iv(a,b,t){if(typeof a==='number'&&typeof b==='number')return a+(b-a)*t;if(Array.isArray(a)&&Array.isArray(b)&&a.length===b.length)return a.map((v,i)=>iv(v,b[i],t));if(a&&b&&typeof a==='object'&&typeof b==='object'){let o={};new Set([...Object.keys(a),...Object.keys(b)]).forEach(k=>o[k]=iv(a[k],b[k],t));return o}return t<.5?clone(a):clone(b)}
-function sceneAt(t){let base={canvas:P.canvas,layers:P.layers},a=P.animation,f=a?.keyframes||[];if(!f.length)return base;if(f.length===1)return f[0].state;f=f.slice().sort((q,w)=>q.time-w.time);if(t<=f[0].time)return f[0].state;if(t>=f[f.length-1].time)return f[f.length-1].state;let i=f.findIndex(q=>q.time>=t),l=f[i-1],r=f[i],u=(t-l.time)/(r.time-l.time);if(a.easing==='smooth')u=u*u*(3-2*u);return iv(l.state,r.state,u)}
+function completeScene(s){let by=new Map((s?.layers||[]).map(l=>[l.id,l]));return{canvas:Object.assign({},P.canvas,s?.canvas||{}),layers:(P.layers||[]).map(l=>Object.assign(clone(l),clone(by.get(l.id)||{})))}}const animationFrames=(P.animation?.keyframes||[]).map(f=>({time:+f.time||0,state:completeScene(f.state)})).sort((a,b)=>a.time-b.time);
+function sceneAt(t){let base={canvas:P.canvas,layers:P.layers},a=P.animation,f=animationFrames;if(!f.length)return base;if(f.length===1)return f[0].state;if(t<=f[0].time)return f[0].state;if(t>=f[f.length-1].time)return f[f.length-1].state;let i=f.findIndex(q=>q.time>=t),l=f[i-1],r=f[i],u=(t-l.time)/(r.time-l.time);if(a.easing==='smooth')u=u*u*(3-2*u);return iv(l.state,r.state,u)}
 function tr(l){x.translate(l.x*P.canvas.w,l.y*P.canvas.h);x.rotate(l.rotation*Math.PI/180);x.scale(l.scale*(l.scaleX||1),l.scale*(l.scaleY||1))}function pull(l,u,t){let r=Math.max(.025,l.anchorRadius||.14),o={x:0,y:0};(l.bendAnchors||[]).forEach(a=>{let du=(u-a.u)/r,dt=(t-a.t)/r,k=Math.exp(-(du*du+dt*dt)*1.8),f=Math.max(.01,l.bendFeather||.12),sd=l.bendSide==='left'?a.u-u:l.bendSide==='right'?u-a.u:l.bendSide==='top'?a.t-t:l.bendSide==='bottom'?t-a.t:f;if(l.bendSide&&l.bendSide!=='all')k*=clamp(sd/f+.5,0,1);if(l.bendAxis!=='vertical')o.x+=(a.dx||0)*P.canvas.w*k;if(l.bendAxis!=='horizontal')o.y+=(a.dy||0)*P.canvas.h*k});return o}function gp(l,u,t){let W=P.canvas.w*1.18,H=P.canvas.h*.92,d=Math.pow(t,1+l.perspective*2);return{x:(u-.5)*W*(1+(1-d)*l.perspective*1.6),y:(d-.5)*H+Math.sin(u*Math.PI*2+t*4)*l.bend*P.canvas.h*(1-t*.55)}}
 function wave(l){let path=new Path2D(),steps=Math.min(110,Math.max(64,Math.round(12000/Math.max(1,l.lines))));for(let n=0;n<l.lines;n++){let k=n/(l.lines-1)-.5;for(let i=0;i<=steps;i++){let u=i/steps,base=k*l.spread*P.canvas.h+Math.sin(u*Math.PI*2*l.frequency+l.phase+k*l.twist*8)*l.amplitude*P.canvas.h*Math.sin(Math.PI*u)+Math.sin(u*Math.PI*4+l.phase*.45)*l.amplitude*P.canvas.h*.18+Math.sin(u*Math.PI*2+l.phase+k*3)*k*l.twist*P.canvas.h*.17,ap=(l.anchors||[]).reduce((s,a)=>s+a.dy*P.canvas.h*Math.exp(-Math.pow((u-a.u)/(l.anchorRadius||.1),2)*2.2),0),px=(u-.5)*P.canvas.w*1.35,py=base+ap;i?path.lineTo(px,py):path.moveTo(px,py)}}let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*Math.min(1,100/Math.max(1,l.lines))*(glow?.7:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.min(24,Math.max(2,(l.glow||0)*P.canvas.w/1920))+'px)':'none';x.strokeStyle=glow?l.glowColor:l.color;x.lineWidth=l.width*P.canvas.w/1920*(glow?2.2:1);x.stroke(path);x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
 function grid(l){let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*(glow?.68:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.max(2,(l.glow||0)*P.canvas.w/1920)+'px)':'none';x.lineWidth=l.width*P.canvas.w/1920*(glow?2.1:1);let R=l.lines,C=Math.round(R*1.55);for(let r=0;r<=R;r++){let t=r/R;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,t):l.color);x.beginPath();for(let i=0;i<=100;i++){let u=i/100,p=gp(l,u,t),q=pull(l,u,t);i?x.lineTo(p.x+q.x,p.y+q.y):x.moveTo(p.x+q.x,p.y+q.y)}x.stroke()}for(let q=0;q<=C;q++){let u=q/C;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,u):l.color);x.beginPath();for(let i=0;i<=70;i++){let t=i/70,p=gp(l,u,t),d=pull(l,u,t);i?x.lineTo(p.x+d.x,p.y+d.y):x.moveTo(p.x+d.x,p.y+d.y)}x.stroke()}x.restore()};if((l.glow||0)>0)pass(true);pass(false)}

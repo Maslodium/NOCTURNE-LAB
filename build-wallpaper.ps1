@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$OutputName = 'NOCTURNE Wallpaper v2.exe'
+    [string]$OutputName = 'NOCTURNE-Wallpaper-Studio.exe'
 )
 
 $ErrorActionPreference = 'Stop'

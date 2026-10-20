@@ -9,8 +9,8 @@ using System.Windows.Forms;
 [assembly: AssemblyDescription("GPU-accelerated animated wallpaper editor")]
 [assembly: AssemblyCompany("NOCTURNE / LAB")]
 [assembly: AssemblyProduct("NOCTURNE / LAB")]
-[assembly: AssemblyVersion("2.0.0.0")]
-[assembly: AssemblyFileVersion("2.0.0.0")]
+[assembly: AssemblyVersion("2.3.0.0")]
+[assembly: AssemblyFileVersion("2.3.0.0")]
 
 internal static class Program
 {

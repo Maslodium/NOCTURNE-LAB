@@ -9,7 +9,7 @@ The v2 editor is built from the original self-contained editor plus a readable e
 - `WallpaperLauncher.cs` — .NET Framework launcher.
 - `wallpaper-studio.html` — generated file; do not edit it directly.
 
-Run `..\build-wallpaper.ps1` after changing the base editor or extension module. The build writes `wallpaper-studio.html` and compiles `..\dist\NOCTURNE Wallpaper v2.exe`.
+Run `..\build-wallpaper.ps1` after changing the base editor or extension module. The build writes `wallpaper-studio.html` and compiles `..\dist\NOCTURNE-Wallpaper-Studio.exe`.
 
 ## Animation model
 
@@ -21,7 +21,7 @@ The editor starts with an empty canvas. Newly added geometry uses neutral transf
 
 The exported ZIP contains a self-contained web wallpaper and `project.json`. Its audio listener follows the Wallpaper Engine web API. Wallpaper properties allow stereo, left, right, or strongest-channel capture, an extra gain multiplier, and an optional signal diagnostic overlay. The physical recording device remains a global Wallpaper Engine setting under **Settings → General → Media**. When no Wallpaper Engine audio source is present, the spectrum remains still unless idle motion was explicitly enabled.
 
-The editor includes a native **1260×2800 Nothing Phone (3)** preset with an editor-only safe-area guide. Exported wallpapers support cover, contain, and stretch fitting. The Wallpaper Engine property panel exposes audio gain, AGC, gate, attack/release, bass/treble balance, spectrum geometry, render quality, and FPS. Android Wallpaper Engine does not provide system audio input, so mobile exports use the optional idle-motion fallback.
+The editor includes a native **1260×2800 Nothing Phone (3)** preset with an editor-only safe-area guide. Exported wallpapers support cover, contain, and stretch fitting. The Wallpaper Engine property panel exposes audio gain, AGC, spectrum sensitivity, gate, attack/release, bass/treble balance, spectrum geometry, render quality, and FPS. Wallpaper Engine for Android can drive audio visualizers when recording permission is granted, but the NOCTURNE Web export is not a native Scene package, so mobile Web exports retain the optional idle-motion fallback.
 
 The runtime retries audio registration if the host API arrives late, applies optional automatic gain and a noise gate, and drops stale samples. Static scene layers are cached, animated wave geometry is batched into one `Path2D`, and expensive blur radii are capped for 4K playback. Idle spectrum motion is disabled by default so missing audio is not hidden.
 

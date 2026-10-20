@@ -1,5 +1,9 @@
 # NOCTURNE / LAB — Wallpaper Studio v2
 
+[![Скачать NOCTURNE Wallpaper Studio](https://img.shields.io/badge/Windows-Скачать_EXE-00d6d6?style=for-the-badge&logo=windows11&logoColor=black)](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)
+
+**[Скачать последнюю версию для Windows](https://github.com/Maslodium/NOCTURNE-LAB/releases/latest/download/NOCTURNE-Wallpaper-Studio.exe)** — один автономный EXE, установка не требуется.
+
 Редактор анимированных обоев для Wallpaper Engine с аппаратно ускоряемым Canvas-рендерингом.
 
 ## Возможности
@@ -27,11 +31,11 @@
 
 Физическое устройство перехвата выбирается глобально в Wallpaper Engine: **Настройки → Основные → Медиа → Устройство записи аудио**.
 
-> Wallpaper Engine для Android не передаёт системный аудиосигнал обоям. На Nothing Phone (3) эквалайзер может работать только в режиме «Движение без аудиосигнала»; настоящая аудиореактивность доступна в Wallpaper Engine на Windows.
+> Wallpaper Engine для Android поддерживает аудиовизуализаторы после выдачи приложению разрешения на запись аудио. Однако NOCTURNE экспортирует Web-проект, а мобильная передача WPE рассчитана прежде всего на Scene/Video. Для Web-версии на Nothing Phone (3) доступен режим «Движение без аудиосигнала».
 
 ## Сборка
 
-Готовая версия: `dist\NOCTURNE Wallpaper v2.exe`.
+Готовая версия: `dist\NOCTURNE-Wallpaper-Studio.exe`.
 
 Для пересборки запустите:
 

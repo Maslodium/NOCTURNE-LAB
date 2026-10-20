@@ -1,0 +1,44 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build standalone editor
+        shell: pwsh
+        run: |
+          ./build-wallpaper.ps1
+          Copy-Item src/wallpaper-studio.html dist/NOCTURNE-Wallpaper-Studio.html
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: NOCTURNE / LAB ${{ github.ref_name }}
+          generate_release_notes: true
+          body: |
+            <p align="center"><img src="https://raw.githubusercontent.com/Maslodium/NOCTURNE-LAB/main/src/nocturne-wallpaper-mark.svg" width="180" alt="NOCTURNE / LAB"></p>
+
+            NOCTURNE / LAB — автономный Canvas-редактор анимированных обоев для Wallpaper Engine и Nothing Phone (3).
+
+            - Бирюзовый интерфейс `RGB(0, 233, 255)` со встроенным Oxanium.
+            - Перетаскиваемые ключи, линейная и плавная интерполяция.
+            - Аудиоспектр с настройками WPE, часы, сетки, волны и глобус.
+            - Экспорт редактируемой WPE-папки, ZIP, превью и установщик проекта для Workshop/Android.
+
+            **Windows:** скачайте `NOCTURNE-Wallpaper-Studio.exe` и запустите без установки.  
+            **Другие ОС:** скачайте `NOCTURNE-Wallpaper-Studio.html` и откройте в современном браузере.
+          files: |
+            dist/NOCTURNE-Wallpaper-Studio.exe
+            dist/NOCTURNE-Wallpaper-Studio.html
+          fail_on_unmatched_files: true

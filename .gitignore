@@ -2,6 +2,7 @@
 123.txt
 log.txt
 .playwright-cli/
+output/
 work/
 *.tmp
 *.bak
@@ -14,3 +15,4 @@ Desktop.ini
 obj/
 bin/
 src/wallpaper-studio.html
+dist/NOCTURNE-Wallpaper-Studio.html

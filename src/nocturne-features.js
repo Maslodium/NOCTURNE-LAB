@@ -238,12 +238,20 @@ function ensureFeatureState() {
   S.animation.duration = clamp(Math.max(Number(S.animation.duration) || 8, lastKeyTime), 1, 600);
   S.animation.time = clamp(Number(S.animation.time) || 0, 0, S.animation.duration);
   S.layers.forEach(layer => {
+    if (layer.type === 'wave') {
+      if (!Array.isArray(layer.anchors)) layer.anchors = [];
+      if (!layer.bendSide) layer.bendSide = 'all';
+      if (!Number.isFinite(layer.bendFeather)) layer.bendFeather = .12;
+      layer.anchors.forEach(anchor => normalizeBendGuide(anchor, 'wave'));
+    }
     if (layer.type === 'grid') {
       if (!Array.isArray(layer.bendAnchors)) layer.bendAnchors = [];
       if (!Number.isFinite(layer.anchorRadius)) layer.anchorRadius = .14;
       if (!layer.bendSide) layer.bendSide = 'all';
+      if (!['all', 'positive', 'negative'].includes(layer.bendSide)) layer.bendSide = ['right', 'bottom'].includes(layer.bendSide) ? 'positive' : 'negative';
       if (!layer.bendAxis) layer.bendAxis = 'both';
       if (!Number.isFinite(layer.bendFeather)) layer.bendFeather = .12;
+      layer.bendAnchors.forEach(anchor => normalizeBendGuide(anchor, 'grid'));
     }
     if (layer.type === 'spectrum') normalizeSpectrum(layer);
     if (layer.type === 'clock') { normalizeClock(layer); activateEmbeddedFont(layer); }
@@ -350,17 +358,56 @@ globeButton.id = 'globe'; globeButton.textContent = '+ Глобус'; globeButto
 geometrySection.querySelector('[data-add-geometry]').appendChild(globeButton);
 globeButton.onclick = () => add(Globe({ name: 'Глобус ' + (S.layers.filter(x => x.type === 'globe').length + 1) }));
 
-/* Two-dimensional Gaussian deformation for perspective grids. */
+/* Bend guides turn the former Gaussian points into finite crease lines. */
+function normalizeBendGuide(anchor, type) {
+  if (!anchor) return anchor;
+  if (!Number.isFinite(anchor.guideLength)) anchor.guideLength = type === 'wave' ? 1.05 : .55;
+  if (!Number.isFinite(anchor.guideAngle)) anchor.guideAngle = type === 'wave' ? 90 : 0;
+  anchor.guideLength = clamp(anchor.guideLength, .05, 1.5);
+  anchor.guideAngle = clamp(anchor.guideAngle, -180, 180);
+  return anchor;
+}
+
+function bendGuideSegment(anchor, type) {
+  normalizeBendGuide(anchor, type);
+  const angle = anchor.guideAngle * Math.PI / 180;
+  const centerU = Number(anchor.u) || 0;
+  const centerV = type === 'wave' ? (Number.isFinite(anchor.v) ? anchor.v : .5) : (Number(anchor.t) || 0);
+  const half = anchor.guideLength * .5, du = Math.cos(angle) * half, dv = Math.sin(angle) * half;
+  return { u1: centerU - du, v1: centerV - dv, u2: centerU + du, v2: centerV + dv };
+}
+
+function bendGuideDistance(anchor, type, u, v) {
+  const line = bendGuideSegment(anchor, type), vx = line.u2 - line.u1, vy = line.v2 - line.v1;
+  const lengthSquared = vx * vx + vy * vy || 1e-6;
+  const along = clamp(((u - line.u1) * vx + (v - line.v1) * vy) / lengthSquared, 0, 1);
+  const nearestU = line.u1 + vx * along, nearestV = line.v1 + vy * along;
+  return { distance: Math.hypot(u - nearestU, v - nearestV), signed: (u - line.u1) * vy - (v - line.v1) * vx };
+}
+
+function bendGuideInfluence(layer, anchor, type, u, v) {
+  const radius = Math.max(.025, layer.anchorRadius || (type === 'wave' ? .1 : .14));
+  const metric = bendGuideDistance(anchor, type, u, v);
+  let influence = Math.exp(-Math.pow(metric.distance / radius, 2) * 2.2);
+  const feather = Math.max(.01, layer.bendFeather || radius);
+  if (layer.bendSide === 'positive') influence *= clamp(metric.signed / feather + .5, 0, 1);
+  else if (layer.bendSide === 'negative') influence *= clamp(-metric.signed / feather + .5, 0, 1);
+  else if (layer.bendSide === 'left') influence *= clamp((anchor.u - u) / feather + .5, 0, 1);
+  else if (layer.bendSide === 'right') influence *= clamp((u - anchor.u) / feather + .5, 0, 1);
+  else if (layer.bendSide === 'top') influence *= clamp(((anchor.t ?? .5) - v) / feather + .5, 0, 1);
+  else if (layer.bendSide === 'bottom') influence *= clamp((v - (anchor.t ?? .5)) / feather + .5, 0, 1);
+  return influence;
+}
+
+anchorPull = function lineGuideWavePull(layer, u, k = 0) {
+  return (layer.anchors || []).reduce((sum, anchor) => sum + (anchor.dy || 0) * S.h * bendGuideInfluence(layer, anchor, 'wave', u, k + .5), 0);
+};
+
+/* Two-dimensional line deformation for perspective grids. */
 function gridAnchorPull(layer, u, t, ignored) {
-  const radius = Math.max(.025, layer.anchorRadius || .14);
   return (layer.bendAnchors || []).reduce((out, anchor) => {
     if (anchor === ignored) return out;
-    const du = (u - anchor.u) / radius;
-    const dt = (t - anchor.t) / radius;
-    let influence = Math.exp(-(du * du + dt * dt) * 1.8);
-    const feather = Math.max(.01, layer.bendFeather || .12);
-    const sideDistance = layer.bendSide === 'left' ? anchor.u - u : layer.bendSide === 'right' ? u - anchor.u : layer.bendSide === 'top' ? anchor.t - t : layer.bendSide === 'bottom' ? t - anchor.t : feather;
-    if (layer.bendSide !== 'all') influence *= clamp(sideDistance / feather + .5, 0, 1);
+    const influence = bendGuideInfluence(layer, anchor, 'grid', u, t);
     if (layer.bendAxis !== 'vertical') out.x += (anchor.dx || 0) * S.w * influence;
     if (layer.bendAxis !== 'horizontal') out.y += (anchor.dy || 0) * S.h * influence;
     return out;
@@ -396,7 +443,7 @@ wavePass = function cachedWavePass(layer, glow) {
     for (let n = 0; n < layer.lines; n += lineStride) {
       const k = n / Math.max(1, layer.lines - 1) - .5;
       for (let i = 0; i <= steps; i++) {
-        const u = i / steps, x = (u - .5) * S.w * 1.35, y = waveBase(layer, u, k) + anchorPull(layer, u);
+        const u = i / steps, x = (u - .5) * S.w * 1.35, y = waveBase(layer, u, k) + anchorPull(layer, u, k);
         i ? path.lineTo(x, y) : path.moveTo(x, y);
       }
     }
@@ -449,14 +496,48 @@ gridPass = function enhancedGridPass(layer, glow) {
 };
 
 const originalHandles = handles;
+function bendGuideWorldPolyline(layer, anchor, samples = 18) {
+  const type = layer.type, line = bendGuideSegment(anchor, type), points = [];
+  for (let index = 0; index <= samples; index++) {
+    const amount = index / samples;
+    const u = clamp(line.u1 + (line.u2 - line.u1) * amount, 0, 1), v = clamp(line.v1 + (line.v2 - line.v1) * amount, 0, 1);
+    if (type === 'wave') {
+      const k = v - .5;
+      points.push(localToWorld(layer, (u - .5) * S.w * 1.35, waveBase(layer, u, k) + anchorPull(layer, u, k)));
+    } else {
+      const basePoint = gridBasePoint(layer, u, v), pull = gridAnchorPull(layer, u, v);
+      points.push(localToWorld(layer, basePoint.x + pull.x, basePoint.y + pull.y));
+    }
+  }
+  return points;
+}
+
+function drawBendGuides(layer, anchors) {
+  anchors.forEach((anchor, index) => {
+    const points = bendGuideWorldPolyline(layer, anchor);
+    o.globalAlpha = index === S.anchor ? .95 : .58;
+    o.strokeStyle = index === S.anchor ? '#00e9ff' : '#86f6ff';
+    o.setLineDash(index === S.anchor ? [] : [8 * S.w / 1920, 6 * S.w / 1920]);
+    o.beginPath(); points.forEach((world, pointIndex) => pointIndex ? o.lineTo(world.x, world.y) : o.moveTo(world.x, world.y)); o.stroke();
+    o.setLineDash([]);
+    [points[0], points.at(-1)].forEach(world => {
+      o.fillStyle = '#101217'; o.beginPath(); o.arc(world.x, world.y, 5 * S.w / 1920, 0, Math.PI * 2); o.fill(); o.stroke();
+    });
+  });
+}
+
 handles = function enhancedHandles() {
   originalHandles();
   const layer = pick();
-  if (!layer || layer.type !== 'grid') return;
+  if (!layer || !['wave', 'grid'].includes(layer.type)) return;
   o.save();
   o.lineWidth = 2 * S.w / 1920;
   o.strokeStyle = '#a9ff68';
   o.fillStyle = '#101217';
+  if (layer.type === 'wave') {
+    drawBendGuides(layer, layer.anchors || []);
+    o.restore(); stage.classList.add('move'); return;
+  }
   (layer.bendAnchors || []).forEach((anchor, index) => {
     const basePoint = gridBasePoint(layer, anchor.u, anchor.t);
     const baseWorld = localToWorld(layer, basePoint.x, basePoint.y);
@@ -470,6 +551,7 @@ handles = function enhancedHandles() {
       o.beginPath(); o.arc(world.x, world.y, 11 * S.w / 1920, 0, Math.PI * 2); o.stroke();
     }
   });
+  drawBendGuides(layer, layer.bendAnchors || []);
   o.restore();
   stage.classList.add('move');
 };
@@ -513,14 +595,16 @@ ov.onpointerdown = event => {
       if (distance < best) { best = distance; hit = index; }
     });
     if (S.adding) {
-      const anchor = layer.type === 'wave' ? { u: .5, dy: 0 } : { u: .5, t: .5, dx: 0, dy: 0 };
+      const anchor = layer.type === 'wave'
+        ? { u: .5, v: .5, dy: 0, guideLength: 1.05, guideAngle: 90 }
+        : { u: .5, t: .5, dx: 0, dy: 0, guideLength: .55, guideAngle: 0 };
       if (layer.type === 'wave') anchorFromPoint(layer, canvasPoint, anchor);
       else setGridAnchorFromPoint(layer, canvasPoint, anchor, true);
       anchors.push(anchor);
       S.anchor = anchors.length - 1;
       S.adding = false;
       S.drag = { type: layer.type + 'Anchor', index: S.anchor };
-      ui(); toast('Точка изгиба добавлена');
+      ui(); toast('Линия изгиба добавлена');
     } else if (best < 20 * S.w / 1920) {
       S.anchor = hit;
       S.drag = { type: layer.type + 'Anchor', index: hit };
@@ -562,13 +646,15 @@ ov.onpointerup = () => {
 ov.ondblclick = event => {
   const layer = pick();
   if (!layer || !['wave', 'grid'].includes(layer.type)) return;
-  const anchor = layer.type === 'wave' ? { u: .5, dy: 0 } : { u: .5, t: .5, dx: 0, dy: 0 };
+  const anchor = layer.type === 'wave'
+    ? { u: .5, v: .5, dy: 0, guideLength: 1.05, guideAngle: 90 }
+    : { u: .5, t: .5, dx: 0, dy: 0, guideLength: .55, guideAngle: 0 };
   if (layer.type === 'wave') anchorFromPoint(layer, point(event), anchor);
   else setGridAnchorFromPoint(layer, point(event), anchor, true);
   const anchors = layer.type === 'wave' ? layer.anchors : layer.bendAnchors;
   anchors.push(anchor);
   S.anchor = anchors.length - 1;
-  sync(); toast('Точка изгиба добавлена');
+  sync(); toast('Линия изгиба добавлена');
 };
 
 /* Audio visualizer. Wallpaper Engine supplies 64 bins for each stereo channel. */
@@ -579,21 +665,43 @@ let audioLastSeen = 0;
 let editorAudioGain = 1;
 let editorAudioUpdatedAt = performance.now();
 let featureClock = 0;
-let forceIdleSpectrum = false;
+let suppressSpectrumDuringRecording = false;
 
 function wallpaperAudioListener(samples) {
   audioInputSeen = true;
   audioLastSeen = performance.now();
+  const source = samples?.left && samples?.right ? null : samples;
+  const length = Number(source?.length) || 0;
+  const stereoBins = length >= 128 ? Math.floor(length / 2) : 0;
+  const monoBins = stereoBins ? stereoBins : length;
+  const read = (channel, index) => {
+    const values = samples?.[channel] || source;
+    const count = Number(values?.length) || monoBins;
+    if (!count) return 0;
+    const sourceIndex = Math.min(count - 1, Math.round(index * (count - 1) / 63));
+    const offset = !samples?.[channel] && channel === 'right' && stereoBins ? stereoBins : 0;
+    return Number(values?.[offset + sourceIndex]) || 0;
+  };
   for (let index = 0; index < 64; index++) {
-    const left = Number(samples[index]) || 0;
-    const right = Number(samples[index + 64]) || 0;
+    const left = read('left', index);
+    const right = samples?.right || stereoBins ? read('right', index) : left;
     audioTarget[index] = Math.min(1.5, (left + right) * .5);
   }
 }
 window.nocturneWallpaperAudioListener = wallpaperAudioListener;
-if (typeof window.wallpaperRegisterAudioListener === 'function') {
+function registerEditorWallpaperAudio() {
+  if (typeof window.wallpaperRegisterAudioListener !== 'function') return false;
   window.wallpaperRegisterAudioListener(wallpaperAudioListener);
+  return true;
 }
+registerEditorWallpaperAudio();
+setInterval(() => {
+  if (!audioLastSeen || performance.now() - audioLastSeen > 2200) registerEditorWallpaperAudio();
+}, 1200);
+addEventListener('focus', registerEditorWallpaperAudio);
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) registerEditorWallpaperAudio();
+});
 
 function sampleAudioBand(values, normalizedIndex, count) {
   const center = clamp(normalizedIndex, 0, 1) * 63;
@@ -629,7 +737,7 @@ function updateEditorAudio(layer) {
     const idle = .16 + .12 * Math.sin(featureClock * 1.8 + index * .37) + .05 * Math.sin(featureClock * .7 + index * .11);
     const target = audioInputSeen
       ? Math.pow(clamp(gated * editorAudioGain * (layer.audioBoost || 1) * tone, 0, 1), .72)
-      : ((layer.idleMotion || forceIdleSpectrum) ? Math.max(.02, idle) : 0);
+      : (layer.idleMotion ? Math.max(.02, idle) : 0);
     const tau = target > audioCurrent[index] ? attack : release;
     const alpha = 1 - Math.exp(-delta / Math.max(.008, tau));
     audioCurrent[index] += (target - audioCurrent[index]) * alpha;
@@ -641,6 +749,7 @@ function spectrumValue(layer, normalizedIndex, count) {
 }
 
 function drawSpectrum(layer) {
+  if (suppressSpectrumDuringRecording) return;
   normalizeSpectrum(layer);
   updateEditorAudio(layer);
   c.save(); transform(c, layer);
@@ -779,6 +888,38 @@ drawImage = function enhancedDrawImage(layer) {
   return originalDrawImage(layer);
 };
 
+function bendGuideField(label, key, value, min, max, step) {
+  return '<div class="row"><div class="label"><span>' + label + '</span><input class="value-edit" type="number" data-guide-key="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '"></div><input type="range" data-guide-key="' + key + '" min="' + min + '" max="' + max + '" step="' + step + '" value="' + value + '"></div>';
+}
+
+function bendGuideControls(layer, type) {
+  const anchors = type === 'wave' ? layer.anchors : layer.bendAnchors;
+  const anchor = S.anchor === null ? null : anchors?.[S.anchor];
+  if (!anchor) return '<div class="note bend-hint">Выберите линию на холсте, чтобы изменить её длину и угол.</div>';
+  normalizeBendGuide(anchor, type);
+  return '<div class="bend-guide-editor"><div class="add-label">Выбранная линия</div>' +
+    bendGuideField('Длина линии', 'guideLength', anchor.guideLength, .05, 1.5, .01) +
+    bendGuideField('Угол линии', 'guideAngle', anchor.guideAngle, -180, 180, 1) +
+    (type === 'wave'
+      ? bendGuideField('Сила изгиба Y', 'dy', anchor.dy || 0, -.5, .5, .005)
+      : bendGuideField('Смещение X', 'dx', anchor.dx || 0, -.5, .5, .005) + bendGuideField('Смещение Y', 'dy', anchor.dy || 0, -.5, .5, .005)) +
+    '</div>';
+}
+
+function bindBendGuideControls(layer, type) {
+  const anchors = type === 'wave' ? layer.anchors : layer.bendAnchors;
+  const anchor = S.anchor === null ? null : anchors?.[S.anchor];
+  if (!anchor) return;
+  panel.querySelectorAll('[data-guide-key]').forEach(input => {
+    input.oninput = () => {
+      const key = input.dataset.guideKey;
+      anchor[key] = +input.value;
+      panel.querySelectorAll('[data-guide-key="' + key + '"]').forEach(peer => { if (peer !== input) peer.value = input.value; });
+      draw();
+    };
+  });
+}
+
 /* Extend the properties panel for grids and spectrum layers. */
 const originalUi = ui;
 ui = function enhancedUi() {
@@ -786,25 +927,39 @@ ui = function enhancedUi() {
   originalUi();
   const layer = pick();
   if (!layer) return;
-  if (layer.type === 'wave') panel.querySelectorAll('[data-key="amplitude"]').forEach(input => { input.min = 0; });
+  if (layer.type === 'wave') {
+    panel.querySelectorAll('[data-key="amplitude"]').forEach(input => { input.min = 0; });
+    const bendGroup = [...panel.querySelectorAll('.group')].find(group => group.querySelector('h3')?.textContent.includes('Точки изгиба'));
+    if (bendGroup) {
+      bendGroup.querySelector('h3').textContent = 'Линии изгиба';
+      const body = bendGroup.querySelector('.group-body') || bendGroup;
+      const radiusLabel = [...body.querySelectorAll('.label span')].find(label => label.textContent.includes('Радиус влияния')); if (radiusLabel) radiusLabel.textContent = 'Ширина влияния линии';
+      const addButton = body.querySelector('[data-add-anchor]'); if (addButton && !S.adding) addButton.textContent = 'Добавить линию';
+      body.insertAdjacentHTML('beforeend', '<div class="row"><div class="label">Сторона линии</div><select style="width:100%" data-wave-bend-side><option value="all" ' + (layer.bendSide === 'all' ? 'selected' : '') + '>по обе стороны</option><option value="positive" ' + (layer.bendSide === 'positive' ? 'selected' : '') + '>сторона A</option><option value="negative" ' + (layer.bendSide === 'negative' ? 'selected' : '') + '>сторона B</option></select></div>' + bendGuideControls(layer, 'wave') + '<div class="note bend-hint">Двойной клик создаёт линию. Перетащите круглый центр, чтобы задать силу изгиба.</div>');
+      body.querySelector('[data-wave-bend-side]').onchange = event => { layer.bendSide = event.target.value; draw(); };
+      bindBendGuideControls(layer, 'wave');
+    }
+  }
   if (layer.type === 'grid') {
     const geometry = [...panel.querySelectorAll('.group')].find(group => group.querySelector('h3')?.textContent.includes('Геометрия сетки'));
     if (geometry) {
       const body = geometry.querySelector('.group-body') || geometry;
       const block = document.createElement('div');
-      block.innerHTML = row('Радиус точек изгиба', 'anchorRadius', .025, .35, .005, value => Math.round(value * 100) + '%') +
+      block.innerHTML = row('Ширина влияния линии', 'anchorRadius', .025, .35, .005, value => Math.round(value * 100) + '%') +
         row('Мягкость границы', 'bendFeather', .01, .5, .01) +
-        '<div class="row"><div class="label">Сторона изгиба</div><select style="width:100%" data-key="bendSide"><option value="all" ' + (layer.bendSide === 'all' ? 'selected' : '') + '>во все стороны</option><option value="left" ' + (layer.bendSide === 'left' ? 'selected' : '') + '>только слева</option><option value="right" ' + (layer.bendSide === 'right' ? 'selected' : '') + '>только справа</option><option value="top" ' + (layer.bendSide === 'top' ? 'selected' : '') + '>только сверху</option><option value="bottom" ' + (layer.bendSide === 'bottom' ? 'selected' : '') + '>только снизу</option></select></div>' +
+        '<div class="row"><div class="label">Сторона линии</div><select style="width:100%" data-key="bendSide"><option value="all" ' + (layer.bendSide === 'all' ? 'selected' : '') + '>по обе стороны</option><option value="positive" ' + (layer.bendSide === 'positive' ? 'selected' : '') + '>сторона A</option><option value="negative" ' + (layer.bendSide === 'negative' ? 'selected' : '') + '>сторона B</option></select></div>' +
         '<div class="row"><div class="label">Ось смещения</div><select style="width:100%" data-key="bendAxis"><option value="both" ' + (layer.bendAxis === 'both' ? 'selected' : '') + '>X и Y</option><option value="horizontal" ' + (layer.bendAxis === 'horizontal' ? 'selected' : '') + '>только X</option><option value="vertical" ' + (layer.bendAxis === 'vertical' ? 'selected' : '') + '>только Y</option></select></div>' +
-        '<div class="pair"><button data-add-grid-anchor>' + (S.adding ? 'Кликните по сетке' : 'Добавить точку') + '</button>' +
+        '<div class="pair"><button data-add-grid-anchor>' + (S.adding ? 'Кликните по сетке' : 'Добавить линию') + '</button>' +
         '<button data-del-grid-anchor ' + (S.anchor === null ? 'disabled' : '') + '>Удалить</button></div>' +
-        '<div class="note bend-hint">Двойной клик по сетке также создаёт точку изгиба.</div>';
+        bendGuideControls(layer, 'grid') +
+        '<div class="note bend-hint">Двойной клик создаёт линию. Перетащите квадратный центр, чтобы задать направление и силу изгиба.</div>';
       body.appendChild(block);
       bind();
       panel.querySelector('[data-add-grid-anchor]')?.addEventListener('click', () => { S.adding = !S.adding; ui(); draw(); });
       panel.querySelector('[data-del-grid-anchor]')?.addEventListener('click', () => {
         if (S.anchor !== null) { layer.bendAnchors.splice(S.anchor, 1); S.anchor = null; sync(); }
       });
+      bindBendGuideControls(layer, 'grid');
     }
   }
   if (layer.type === 'spectrum') {
@@ -1119,16 +1274,16 @@ function wallpaperRuntimeHtml(project) {
 const P=${data},cv=document.getElementById('c'),leftBins=new Float32Array(64),rightBins=new Float32Array(64),bins=new Float32Array(64),smooth=new Float32Array(64),R={channel:'stereo',gain:1,status:false,sensitivity:null,gate:null,smoothing:null,attack:null,release:null,bass:null,treble:null,bars:null,style:'project',width:1,height:1,offsetX:0,offsetY:0,glow:1,mirror:null,autoGain:null,idle:null,fit:'cover',quality:'balanced',fps:0};let x=cv.getContext('2d',{alpha:false}),hasAudio=false,lastAudioAt=0,lastSignalAt=0,audioGain=1,audioUpdatedAt=performance.now(),audioFrameStamp=-1,start=performance.now(),audioRegistered=false;
 if(typeof FontFace==='function')(P.layers||[]).filter(l=>l.type==='clock'&&l.fontData).forEach(l=>{new FontFace(l.fontFamily,'url('+l.fontData+')').load().then(f=>document.fonts.add(f)).catch(()=>{})});
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rgb=h=>{let q=h.slice(1);return[parseInt(q.slice(0,2),16),parseInt(q.slice(2,4),16),parseInt(q.slice(4,6),16)]},mix=(a,b,t)=>{let A=rgb(a),B=rgb(b);return'rgb('+A.map((v,i)=>Math.round(v+(B[i]-v)*t))+')'};
-function wallpaperAudioListener(samples){hasAudio=true;lastAudioAt=performance.now();let peak=0;for(let i=0;i<64;i++){leftBins[i]=clamp(+samples[i]||0,0,1);rightBins[i]=clamp(+samples[i+64]||0,0,1);peak=Math.max(peak,leftBins[i],rightBins[i])}if(peak>.0005)lastSignalAt=lastAudioAt}
+function wallpaperAudioListener(samples){hasAudio=true;lastAudioAt=performance.now();let source=samples?.left&&samples?.right?null:samples,length=Number(source?.length)||0,stereoBins=length>=128?Math.floor(length/2):0,monoBins=stereoBins?stereoBins:length,read=(channel,index)=>{let values=samples?.[channel]||source,count=Number(values?.length)||monoBins;if(!count)return 0;let sourceIndex=Math.min(count-1,Math.round(index*(count-1)/63)),offset=!samples?.[channel]&&channel==='right'&&stereoBins?stereoBins:0;return Number(values?.[offset+sourceIndex])||0},peak=0;for(let i=0;i<64;i++){let left=clamp(read('left',i),0,1),right=clamp(samples?.right||stereoBins?read('right',i):left,0,1);leftBins[i]=left;rightBins[i]=right;peak=Math.max(peak,left,right)}if(peak>.0005)lastSignalAt=lastAudioAt}
 window.wallpaperAudioListener=window.nocturneWallpaperAudioListener=wallpaperAudioListener;
-function registerWallpaperAudio(){if(!audioRegistered&&typeof window.wallpaperRegisterAudioListener==='function'){window.wallpaperRegisterAudioListener(wallpaperAudioListener);audioRegistered=true;return true}return false}
-registerWallpaperAudio();if(!audioRegistered){let audioRegisterTimer=setInterval(()=>{if(registerWallpaperAudio())clearInterval(audioRegisterTimer)},100)}
-window.wallpaperPropertyListener={applyUserProperties:function(p){let number=(key,target,min,max,scale=1)=>{if(p[key])R[target]=clamp(Number(p[key].value)*scale,min,max)};if(p.nocturneaudiochannel)R.channel=String(p.nocturneaudiochannel.value||'stereo');number('nocturnegain','gain',.25,8);number('nocturneaudiogain','gain',.25,8);number('nocturnesensitivity','sensitivity',.1,12);number('nocturnegate','gate',0,.4);number('nocturnesmoothing','smoothing',0,.96);number('nocturneattack','attack',12,500);number('nocturnerelease','release',30,1600);number('nocturnebass','bass',.25,4);number('nocturnetreble','treble',.25,4);number('nocturnebars','bars',8,64);number('nocturnewidth','width',.25,2.5,.01);number('nocturneheight','height',.25,2.5,.01);number('nocturneoffsetx','offsetX',-.5,.5,.01);number('nocturneoffsety','offsetY',-.5,.5,.01);number('nocturneglow','glow',0,2.5,.01);if(p.nocturnestyle)R.style=String(p.nocturnestyle.value||'project');if(p.nocturnemirror)R.mirror=!!p.nocturnemirror.value;if(p.nocturneautogain)R.autoGain=!!p.nocturneautogain.value;if(p.nocturneidlemotion)R.idle=!!p.nocturneidlemotion.value;if(p.nocturneaudiostatus)R.status=!!p.nocturneaudiostatus.value;if(p.nocturnefit)R.fit=String(p.nocturnefit.value||'cover');if(p.nocturnequality){R.quality=String(p.nocturnequality.value||'balanced');resize()}if(p.nocturnefps)R.fps=Number(p.nocturnefps.value)||0}};
+function registerWallpaperAudio(){if(typeof window.wallpaperRegisterAudioListener!=='function')return false;window.wallpaperRegisterAudioListener(wallpaperAudioListener);audioRegistered=true;return true}
+registerWallpaperAudio();setInterval(()=>{if(!lastAudioAt||performance.now()-lastAudioAt>2200)registerWallpaperAudio()},1200);addEventListener('focus',registerWallpaperAudio);document.addEventListener('visibilitychange',()=>{if(!document.hidden)registerWallpaperAudio()});
+window.wallpaperPropertyListener={applyUserProperties:function(p){registerWallpaperAudio();let number=(key,target,min,max,scale=1)=>{if(p[key])R[target]=clamp(Number(p[key].value)*scale,min,max)};if(p.nocturneaudiochannel)R.channel=String(p.nocturneaudiochannel.value||'stereo');number('nocturnegain','gain',.25,8);number('nocturneaudiogain','gain',.25,8);number('nocturnesensitivity','sensitivity',.1,12);number('nocturnegate','gate',0,.4);number('nocturnesmoothing','smoothing',0,.96);number('nocturneattack','attack',12,500);number('nocturnerelease','release',30,1600);number('nocturnebass','bass',.25,4);number('nocturnetreble','treble',.25,4);number('nocturnebars','bars',8,64);number('nocturnewidth','width',.25,2.5,.01);number('nocturneheight','height',.25,2.5,.01);number('nocturneoffsetx','offsetX',-.5,.5,.01);number('nocturneoffsety','offsetY',-.5,.5,.01);number('nocturneglow','glow',0,2.5,.01);if(p.nocturnestyle)R.style=String(p.nocturnestyle.value||'project');if(p.nocturnemirror)R.mirror=!!p.nocturnemirror.value;if(p.nocturneautogain)R.autoGain=!!p.nocturneautogain.value;if(p.nocturneidlemotion)R.idle=!!p.nocturneidlemotion.value;if(p.nocturneaudiostatus)R.status=!!p.nocturneaudiostatus.value;if(p.nocturnefit)R.fit=String(p.nocturnefit.value||'cover');if(p.nocturnequality){R.quality=String(p.nocturnequality.value||'balanced');resize()}if(p.nocturnefps)R.fps=Number(p.nocturnefps.value)||0}};
 function clone(v){return JSON.parse(JSON.stringify(v))}function iv(a,b,t){if(typeof a==='number'&&typeof b==='number')return a+(b-a)*t;if(Array.isArray(a)&&Array.isArray(b)&&a.length===b.length)return a.map((v,i)=>iv(v,b[i],t));if(a&&b&&typeof a==='object'&&typeof b==='object'){let o={};new Set([...Object.keys(a),...Object.keys(b)]).forEach(k=>o[k]=iv(a[k],b[k],t));return o}return t<.5?clone(a):clone(b)}
 function completeScene(s){let by=new Map((s?.layers||[]).map(l=>[l.id,l]));return{canvas:Object.assign({},P.canvas,s?.canvas||{}),layers:(P.layers||[]).map(l=>Object.assign(clone(l),clone(by.get(l.id)||{})))}}const animationFrames=(P.animation?.keyframes||[]).map(f=>({time:+f.time||0,state:completeScene(f.state)})).sort((a,b)=>a.time-b.time);
 function sceneAt(t){let base={canvas:P.canvas,layers:P.layers},a=P.animation,f=animationFrames;if(!f.length)return base;if(f.length===1)return f[0].state;if(t<=f[0].time)return f[0].state;if(t>=f[f.length-1].time)return f[f.length-1].state;let i=f.findIndex(q=>q.time>=t),l=f[i-1],r=f[i],u=(t-l.time)/(r.time-l.time);if(a.easing==='smooth')u=u*u*(3-2*u);return iv(l.state,r.state,u)}
-function tr(l){x.translate(l.x*P.canvas.w,l.y*P.canvas.h);x.rotate(l.rotation*Math.PI/180);x.scale(l.scale*(l.scaleX||1),l.scale*(l.scaleY||1))}function pull(l,u,t){let r=Math.max(.025,l.anchorRadius||.14),o={x:0,y:0};(l.bendAnchors||[]).forEach(a=>{let du=(u-a.u)/r,dt=(t-a.t)/r,k=Math.exp(-(du*du+dt*dt)*1.8),f=Math.max(.01,l.bendFeather||.12),sd=l.bendSide==='left'?a.u-u:l.bendSide==='right'?u-a.u:l.bendSide==='top'?a.t-t:l.bendSide==='bottom'?t-a.t:f;if(l.bendSide&&l.bendSide!=='all')k*=clamp(sd/f+.5,0,1);if(l.bendAxis!=='vertical')o.x+=(a.dx||0)*P.canvas.w*k;if(l.bendAxis!=='horizontal')o.y+=(a.dy||0)*P.canvas.h*k});return o}function gp(l,u,t){let W=P.canvas.w*1.18,H=P.canvas.h*.92,d=Math.pow(t,1+l.perspective*2);return{x:(u-.5)*W*(1+(1-d)*l.perspective*1.6),y:(d-.5)*H+Math.sin(u*Math.PI*2+t*4)*l.bend*P.canvas.h*(1-t*.55)}}
-function wave(l){let path=new Path2D(),steps=Math.min(110,Math.max(64,Math.round(12000/Math.max(1,l.lines))));for(let n=0;n<l.lines;n++){let k=n/(l.lines-1)-.5;for(let i=0;i<=steps;i++){let u=i/steps,base=k*l.spread*P.canvas.h+Math.sin(u*Math.PI*2*l.frequency+l.phase+k*l.twist*8)*l.amplitude*P.canvas.h*Math.sin(Math.PI*u)+Math.sin(u*Math.PI*4+l.phase*.45)*l.amplitude*P.canvas.h*.18+Math.sin(u*Math.PI*2+l.phase+k*3)*k*l.twist*P.canvas.h*.17,ap=(l.anchors||[]).reduce((s,a)=>s+a.dy*P.canvas.h*Math.exp(-Math.pow((u-a.u)/(l.anchorRadius||.1),2)*2.2),0),px=(u-.5)*P.canvas.w*1.35,py=base+ap;i?path.lineTo(px,py):path.moveTo(px,py)}}let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*Math.min(1,100/Math.max(1,l.lines))*(glow?.7:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.min(24,Math.max(2,(l.glow||0)*P.canvas.w/1920))+'px)':'none';x.strokeStyle=glow?l.glowColor:l.color;x.lineWidth=l.width*P.canvas.w/1920*(glow?2.2:1);x.stroke(path);x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
+function tr(l){x.translate(l.x*P.canvas.w,l.y*P.canvas.h);x.rotate(l.rotation*Math.PI/180);x.scale(l.scale*(l.scaleX||1),l.scale*(l.scaleY||1))}function guideMetric(a,type,u,v){let len=Number.isFinite(a.guideLength)?a.guideLength:(type==='wave'?1.05:.55),ang=(Number.isFinite(a.guideAngle)?a.guideAngle:(type==='wave'?90:0))*Math.PI/180,cu=+a.u||0,cv=type==='wave'?(Number.isFinite(a.v)?a.v:.5):(+a.t||0),du=Math.cos(ang)*len*.5,dv=Math.sin(ang)*len*.5,u1=cu-du,v1=cv-dv,u2=cu+du,v2=cv+dv,vx=u2-u1,vy=v2-v1,z=vx*vx+vy*vy||1e-6,q=clamp(((u-u1)*vx+(v-v1)*vy)/z,0,1),nu=u1+vx*q,nv=v1+vy*q;return{distance:Math.hypot(u-nu,v-nv),signed:(u-u1)*vy-(v-v1)*vx}}function influence(l,a,type,u,v){let m=guideMetric(a,type,u,v),r=Math.max(.025,l.anchorRadius||(type==='wave'?.1:.14)),k=Math.exp(-Math.pow(m.distance/r,2)*2.2),f=Math.max(.01,l.bendFeather||r),side=l.bendSide||'all';if(side==='positive')k*=clamp(m.signed/f+.5,0,1);else if(side==='negative')k*=clamp(-m.signed/f+.5,0,1);else if(side==='left')k*=clamp((a.u-u)/f+.5,0,1);else if(side==='right')k*=clamp((u-a.u)/f+.5,0,1);else if(side==='top')k*=clamp(((a.t??.5)-v)/f+.5,0,1);else if(side==='bottom')k*=clamp((v-(a.t??.5))/f+.5,0,1);return k}function pull(l,u,t){let o={x:0,y:0};(l.bendAnchors||[]).forEach(a=>{let k=influence(l,a,'grid',u,t);if(l.bendAxis!=='vertical')o.x+=(a.dx||0)*P.canvas.w*k;if(l.bendAxis!=='horizontal')o.y+=(a.dy||0)*P.canvas.h*k});return o}function gp(l,u,t){let W=P.canvas.w*1.18,H=P.canvas.h*.92,d=Math.pow(t,1+l.perspective*2);return{x:(u-.5)*W*(1+(1-d)*l.perspective*1.6),y:(d-.5)*H+Math.sin(u*Math.PI*2+t*4)*l.bend*P.canvas.h*(1-t*.55)}}
+function wave(l){let path=new Path2D(),steps=Math.min(110,Math.max(64,Math.round(12000/Math.max(1,l.lines))));for(let n=0;n<l.lines;n++){let k=n/(l.lines-1)-.5;for(let i=0;i<=steps;i++){let u=i/steps,base=k*l.spread*P.canvas.h+Math.sin(u*Math.PI*2*l.frequency+l.phase+k*l.twist*8)*l.amplitude*P.canvas.h*Math.sin(Math.PI*u)+Math.sin(u*Math.PI*4+l.phase*.45)*l.amplitude*P.canvas.h*.18+Math.sin(u*Math.PI*2+l.phase+k*3)*k*l.twist*P.canvas.h*.17,ap=(l.anchors||[]).reduce((s,a)=>s+(a.dy||0)*P.canvas.h*influence(l,a,'wave',u,k+.5),0),px=(u-.5)*P.canvas.w*1.35,py=base+ap;i?path.lineTo(px,py):path.moveTo(px,py)}}let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*Math.min(1,100/Math.max(1,l.lines))*(glow?.7:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.min(24,Math.max(2,(l.glow||0)*P.canvas.w/1920))+'px)':'none';x.strokeStyle=glow?l.glowColor:l.color;x.lineWidth=l.width*P.canvas.w/1920*(glow?2.2:1);x.stroke(path);x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
 function grid(l){let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*(glow?.68:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.max(2,(l.glow||0)*P.canvas.w/1920)+'px)':'none';x.lineWidth=l.width*P.canvas.w/1920*(glow?2.1:1);let R=l.lines,C=Math.round(R*1.55);for(let r=0;r<=R;r++){let t=r/R;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,t):l.color);x.beginPath();for(let i=0;i<=100;i++){let u=i/100,p=gp(l,u,t),q=pull(l,u,t);i?x.lineTo(p.x+q.x,p.y+q.y):x.moveTo(p.x+q.x,p.y+q.y)}x.stroke()}for(let q=0;q<=C;q++){let u=q/C;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,u):l.color);x.beginPath();for(let i=0;i<=70;i++){let t=i/70,p=gp(l,u,t),d=pull(l,u,t);i?x.lineTo(p.x+d.x,p.y+d.y):x.moveTo(p.x+d.x,p.y+d.y)}x.stroke()}x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
 function spot(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;let r=l.radius*P.canvas.w,g=x.createRadialGradient(0,0,r*(1-l.softness),0,0,r),A=rgb(l.color),B=rgb(l.color2);g.addColorStop(0,'rgba('+A.join(',')+',1)');g.addColorStop(.52,'rgba('+B.join(',')+',.62)');g.addColorStop(1,'rgba('+B.join(',')+',0)');x.scale(l.stretch,1);x.fillStyle=g;x.fillRect(-r,-r,r*2,r*2);x.restore()}
 function updateAudio(l,now){if(now-audioFrameStamp<4)return;let dt=clamp((now-audioUpdatedAt)/1000,1/240,.1);audioUpdatedAt=now;audioFrameStamp=now;if(hasAudio&&now-lastAudioAt>1200)hasAudio=false;let rms=0;for(let i=0;i<64;i++){let left=leftBins[i],right=rightBins[i],value=R.channel==='left'?left:R.channel==='right'?right:R.channel==='strongest'?Math.max(left,right):(left+right)*.5;bins[i]=value;rms+=value*value}rms=Math.sqrt(rms/64);let auto=R.autoGain===null?l.autoGain:R.autoGain,desired=hasAudio&&auto?clamp(.2/Math.max(.012,rms),.75,6):1;audioGain+=(desired-audioGain)*(desired<audioGain ? .2 : .045);let sm=R.smoothing===null?(l.smoothing??.72):R.smoothing,inertia=.3+clamp(sm,0,.96)*1.7,attack=Math.max(12,R.attack===null?(l.attack||70):R.attack)/1000*inertia,release=Math.max(30,R.release===null?(l.release||260):R.release)/1000*inertia,gate=R.gate===null?(l.noiseGate||0):R.gate,bass=R.bass===null?(l.bassBoost||1):R.bass,treble=R.treble===null?(l.trebleBoost||1):R.treble,idleOn=R.idle===null?l.idleMotion:R.idle;for(let i=0;i<64;i++){let f=i/63,tone=bass+(treble-bass)*f,gated=bins[i]<=gate?0:(bins[i]-gate)/Math.max(.001,1-gate),idle=.16+.12*Math.sin(now/1000*1.8+i*.37)+.05*Math.sin(now/1000*.7+i*.11),target=hasAudio?Math.pow(clamp(gated*audioGain*R.gain*(l.audioBoost||1)*tone,0,1),.72):(idleOn?Math.max(.02,idle):0),tau=target>smooth[i]?attack:release,alpha=1-Math.exp(-dt/Math.max(.008,tau));smooth[i]+=(target-smooth[i])*alpha}}
@@ -1246,7 +1401,8 @@ wallpaperFolderButton.title = 'Записать редактируемый пр�
 const wallpaperZipButton = document.createElement('button'); wallpaperZipButton.type = 'button'; wallpaperZipButton.textContent = 'WPE ZIP';
 wallpaperZipButton.title = 'Скачать переносимый ZIP Wallpaper Engine'; wallpaperZipButton.onclick = exportWallpaperZip;
 const androidExportButton = document.createElement('button'); androidExportButton.type = 'button'; androidExportButton.textContent = 'Android';
-androidExportButton.title = 'Записать совместимую с WPE Android зацикленную видеоверсию';
+androidExportButton.textContent = 'Android Scene';
+androidExportButton.title = 'Создать нативный WPE Scene с живым аудиоспектром для Android';
 
 function preferredVideoMimeType() {
   const candidates = [
@@ -1262,15 +1418,21 @@ function preferredVideoMimeType() {
 async function recordMobileVideo() {
   if (typeof MediaRecorder === 'undefined' || typeof cv.captureStream !== 'function') throw new Error('Этот браузер не поддерживает запись Canvas');
   const format = preferredVideoMimeType(); if (!format) throw new Error('В браузере нет подходящего видеокодека');
-  const duration = clamp(Number(S.animation.duration) || 8, 1, 30), fps = Math.min(30, S.animation.fps || 30);
+  if (format.extension !== 'mp4') throw new Error('Для Android Scene нужен браузер с записью MP4/H.264');
+  const keyTimes = (S.animation.keyframes || []).map(frame => Number(frame.time)).filter(Number.isFinite).sort((a, b) => a - b);
+  const startTime = keyTimes.length > 1 ? keyTimes[0] : 0;
+  const endTime = keyTimes.length > 1 ? keyTimes.at(-1) : Number(S.animation.duration) || 8;
+  const duration = clamp(endTime - startTime, 1, 30), fps = Math.min(30, S.animation.fps || 30);
   const savedScene = captureSceneState(), savedTime = S.animation.time, savedPlaying = S.animation.playing;
+  const savedDuration = S.animation.duration, savedLoop = S.animation.loop;
   const stream = cv.captureStream(fps), chunks = [], bits = clamp(Math.round(S.w * S.h * fps * .12), 4000000, 16000000);
   const recorder = new MediaRecorder(stream, { mimeType: format.type, videoBitsPerSecond: bits });
   recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
   const stopped = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = event => reject(event.error || new Error('Ошибка записи')); });
   try {
-    forceIdleSpectrum = true;
-    S.animation.time = 0; S.animation.playing = S.animation.keyframes.length > 1;
+    suppressSpectrumDuringRecording = true;
+    S.animation.duration = endTime; S.animation.loop = false;
+    S.animation.time = startTime; sampleAnimation(startTime); S.animation.playing = S.animation.keyframes.length > 1;
     recorder.start(250);
     const started = performance.now();
     while (performance.now() - started < duration * 1000) {
@@ -1282,32 +1444,142 @@ async function recordMobileVideo() {
     if (!chunks.length) throw new Error('Браузер не записал видеопоток');
     return { bytes: new Uint8Array(await new Blob(chunks, { type: format.type }).arrayBuffer()), extension: format.extension };
   } finally {
-    forceIdleSpectrum = false;
+    suppressSpectrumDuringRecording = false;
     stream.getTracks().forEach(track => track.stop());
+    S.animation.duration = savedDuration; S.animation.loop = savedLoop;
     S.animation.time = savedTime; S.animation.playing = savedPlaying; applySceneState(savedScene); refreshTimeline(); sync();
-    androidExportButton.textContent = 'Android'; androidExportButton.disabled = false;
+    androidExportButton.textContent = 'Android Scene'; androidExportButton.disabled = false;
   }
+}
+
+function wpeColor(hex) {
+  return rgb(/^#[0-9a-f]{6}$/i.test(hex || '') ? hex : '#ffffff').map(value => Number((value / 255).toFixed(4))).join(' ');
+}
+
+function nativeSpectrumShaders(layer) {
+  const mirror = layer?.mirror !== false ? '1.0' : '0.0';
+  const rotation = Number(layer?.rotation || 0).toFixed(3);
+  const vertex = `#include "common_vertex.h"
+uniform mat4 g_ModelViewProjectionMatrix;
+uniform vec4 g_AudioSpectrum16Left[4];
+uniform vec4 g_AudioSpectrum16Right[4];
+attribute vec3 a_Position;
+attribute vec2 a_TexCoord;
+varying vec2 v_TexCoord;
+varying lowp vec4 v_Audio0;
+varying lowp vec4 v_Audio1;
+varying lowp vec4 v_Audio2;
+varying lowp vec4 v_Audio3;
+void main(){
+ gl_Position=mul(vec4(a_Position,1.0),g_ModelViewProjectionMatrix);
+ v_TexCoord=a_TexCoord;
+ v_Audio0=(g_AudioSpectrum16Left[0]+g_AudioSpectrum16Right[0])*0.5;
+ v_Audio1=(g_AudioSpectrum16Left[1]+g_AudioSpectrum16Right[1])*0.5;
+ v_Audio2=(g_AudioSpectrum16Left[2]+g_AudioSpectrum16Right[2])*0.5;
+ v_Audio3=(g_AudioSpectrum16Left[3]+g_AudioSpectrum16Right[3])*0.5;
+}`;
+  const fragment = `#include "common_fragment.h"
+uniform float g_Sensitivity; // {"material":"sensitivity","default":1.35,"range":[0.1,12]}
+uniform float g_Width; // {"material":"width","default":100,"range":[25,250]}
+uniform float g_Height; // {"material":"height","default":100,"range":[25,250]}
+uniform float g_OffsetX; // {"material":"offsetx","default":0,"range":[-50,50]}
+uniform float g_OffsetY; // {"material":"offsety","default":0,"range":[-50,50]}
+uniform float g_Glow; // {"material":"glow","default":100,"range":[0,250]}
+uniform lowp vec3 g_ColorA; // {"material":"colora","default":"1 1 1"}
+uniform lowp vec3 g_ColorB; // {"material":"colorb","default":"0 0.9137 1"}
+varying vec2 v_TexCoord;
+varying lowp vec4 v_Audio0;
+varying lowp vec4 v_Audio1;
+varying lowp vec4 v_Audio2;
+varying lowp vec4 v_Audio3;
+void main(){
+ vec2 center=vec2(${Number(layer?.x ?? .5).toFixed(5)},${Number(layer?.y ?? .72).toFixed(5)})+vec2(g_OffsetX,g_OffsetY)/100.0;
+ float angle=-${rotation}*0.01745329252,cs=cos(angle),sn=sin(angle);
+ vec2 p=v_TexCoord-center;p=vec2(cs*p.x-sn*p.y,sn*p.x+cs*p.y);
+ float width=max(0.01,${Number(layer?.width || .72).toFixed(5)}*g_Width/100.0);
+ float height=max(0.01,${Number(layer?.height || .23).toFixed(5)}*g_Height/100.0);
+ float nx=p.x/width+0.5;
+ float bounds=step(0.0,nx)*step(nx,1.0);
+ int band=int(clamp(floor(nx*16.0),0.0,15.0));
+ float audio=0.0;
+ if(band==0)audio=v_Audio0.x;else if(band==1)audio=v_Audio0.y;else if(band==2)audio=v_Audio0.z;else if(band==3)audio=v_Audio0.w;
+ else if(band==4)audio=v_Audio1.x;else if(band==5)audio=v_Audio1.y;else if(band==6)audio=v_Audio1.z;else if(band==7)audio=v_Audio1.w;
+ else if(band==8)audio=v_Audio2.x;else if(band==9)audio=v_Audio2.y;else if(band==10)audio=v_Audio2.z;else if(band==11)audio=v_Audio2.w;
+ else if(band==12)audio=v_Audio3.x;else if(band==13)audio=v_Audio3.y;else if(band==14)audio=v_Audio3.z;else audio=v_Audio3.w;
+ audio*=g_Sensitivity;
+ audio=clamp(pow(max(audio,0.0),0.72),0.0,1.25);
+ float cell=frac(nx*16.0);
+ float gap=${Number(layer?.gap ?? .24).toFixed(5)}*0.48;
+ float edgeA=smoothstep(gap,gap+0.025,cell);
+ float edgeB=smoothstep(gap,gap+0.025,1.0-cell);
+ float barMask=edgeA*edgeB;
+ float py=p.y/height,mirror=${mirror};
+ float distanceToBar=mirror>0.5?abs(py):max(py,-py-audio);
+ float inside=mirror>0.5?1.0-step(audio,abs(py)):step(-audio,py)*step(py,0.0);
+ float halo=exp(-max(0.0,distanceToBar)*max(8.0,42.0-g_Glow*0.12))*0.42;
+ vec3 color=mix(g_ColorA,g_ColorB,clamp(nx,0.0,1.0));
+ float alpha=clamp(inside*barMask+halo*barMask,0.0,1.0)*bounds;
+ gl_FragColor=vec4(color*alpha,alpha);
+}`;
+  return { vertex, fragment };
+}
+
+function nativeSceneFiles(video, preview) {
+  const spectrum = S.layers.find(layer => layer.type === 'spectrum' && layer.visible) || Spectrum({ visible: true });
+  normalizeSpectrum(spectrum);
+  const shaders = nativeSpectrumShaders(spectrum);
+  const manifest = {
+    file: 'scene.json', type: 'scene', title: projectName + ' · Android Scene',
+    description: 'Native mobile Scene generated by NOCTURNE / LAB with live audio spectrum.', preview: 'preview.png',
+    tags: ['Technology', 'Music'], visibility: 'private',
+    general: { supportsaudioprocessing: true, supportsvideo: true, supportsvideoflags: 2, properties: {
+      nocturneaudioheading: { order: 90, text: '<h3>Аудиоспектр</h3>', type: 'text' },
+      nocturnesensitivity: { index: 0, order: 100, text: 'Чувствительность', type: 'slider', value: Number(spectrum.sensitivity || 1.35), min: .1, max: 12, step: .05, fraction: true, precision: 2 },
+      nocturnewidth: { index: 1, order: 101, text: 'Ширина, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
+      nocturneheight: { index: 2, order: 102, text: 'Высота, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
+      nocturneoffsetx: { index: 3, order: 103, text: 'Смещение X, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
+      nocturneoffsety: { index: 4, order: 104, text: 'Смещение Y, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
+      nocturneglow: { index: 5, order: 105, text: 'Свечение, %', type: 'slider', value: 100, min: 0, max: 250, step: 5 },
+      nocturnecolora: { index: 6, order: 106, text: 'Цвет низких частот', type: 'color', value: wpeColor(spectrum.color) },
+      nocturnecolorb: { index: 7, order: 107, text: 'Цвет высоких частот', type: 'color', value: wpeColor(spectrum.color2) }
+    } }
+  };
+  const scene = {
+    camera: { center: '0 0 -1.000', eye: '0 0 0.000', up: '0.000 1.000 0.000' },
+    general: { bloom: false, clearcolor: '0 0 0', orthogonalprojection: { width: S.w, height: S.h }, supportsaudioprocessing: true },
+    objects: [
+      { id: 1, name: 'NOCTURNE Background', image: 'models/background.json', origin: (S.w / 2) + ' ' + (S.h / 2) + ' 0', scale: '1 1 1' },
+      { id: 2, name: 'NOCTURNE Native Audio Spectrum', image: 'models/spectrum.json', origin: (S.w / 2) + ' ' + (S.h / 2) + ' -0.01', scale: '1 1 1' }
+    ]
+  };
+  const backgroundModel = { material: 'materials/background.json', nopadding: true, autosize: true };
+  const spectrumModel = { material: 'materials/spectrum.json', nopadding: true, autosize: true };
+  const backgroundMaterial = { passes: [{ blending: 'normal', cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'genericimage', textures: ['materials/background.mp4'] }] };
+  const spectrumMaterial = { passes: [{ blending: 'additive', cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'nocturne_spectrum', textures: ['materials/background.mp4'], usershadervalues: {
+    nocturnesensitivity: 'sensitivity', nocturnewidth: 'width', nocturneheight: 'height', nocturneoffsetx: 'offsetx', nocturneoffsety: 'offsety', nocturneglow: 'glow', nocturnecolora: 'colora', nocturnecolorb: 'colorb'
+  } }] };
+  return {
+    'project.json': JSON.stringify(manifest, null, 2), 'scene.json': JSON.stringify(scene, null, 2), 'preview.png': preview,
+    'models/background.json': JSON.stringify(backgroundModel, null, 2), 'models/spectrum.json': JSON.stringify(spectrumModel, null, 2),
+    'materials/background.json': JSON.stringify(backgroundMaterial, null, 2), 'materials/spectrum.json': JSON.stringify(spectrumMaterial, null, 2),
+    'materials/background.mp4': video.bytes, 'shaders/nocturne_spectrum.vert': shaders.vertex, 'shaders/nocturne_spectrum.frag': shaders.fragment
+  };
 }
 
 async function exportAndroidPackage() {
   androidExportButton.disabled = true;
   try {
     setProjectName(projectNameInput.value); toast('Запись мобильного цикла началась');
-    const video = await recordMobileVideo(), preview = await createWallpaperPreview(), videoName = 'wallpaper.' + video.extension;
-    const manifest = JSON.stringify({
-      file: videoName, type: 'video', title: projectName + ' · Android',
-      description: 'Mobile video export generated by NOCTURNE / LAB.', preview: 'preview.png',
-      tags: ['Technology'], visibility: 'private'
-    }, null, 2);
+    const video = await recordMobileVideo(), preview = await createWallpaperPreview();
     const safeBatchName = (projectFileStem() + '-android').replace(/%/g, '%%').replace(/!/g, '').replace(/[&()^]/g, '-');
-    const installer = '@echo off\r\nsetlocal\r\nset "WPE_DIR=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" set "WPE_DIR=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" (echo Wallpaper Engine not found.&pause&exit /b 1)\r\nset "DEST=%WPE_DIR%\\projects\\myprojects\\' + safeBatchName + '"\r\nif not exist "%DEST%" mkdir "%DEST%"\r\nrobocopy "%~dp0." "%DEST%" /E /R:1 /W:1 /XF INSTALL-ANDROID.cmd >nul\r\nif errorlevel 8 (echo Could not install the project.&pause&exit /b 1)\r\nstart "" /D "%WPE_DIR%" "%WPE_DIR%\\launcher.exe"\r\necho Android-compatible Video project installed.\r\necho Select it in Wallpaper Engine and choose Send to Mobile Device.\r\npause\r\n';
-    const readme = 'Совместимый с WPE Android Video-проект. Распакуйте ZIP и запустите INSTALL-ANDROID.cmd. Затем выберите обои в Wallpaper Engine и нажмите «Отправить на мобильное устройство».\r\n\r\nЭто зацикленная видеозапись: ключевая анимация, часы и глобус сохраняются. Спектр записывается с алгоритмическим движением, потому что мобильные Video-обои не получают живой системный аудиоспектр.\r\n';
-    const files = { 'project.json': manifest, 'preview.png': preview, 'INSTALL-ANDROID.cmd': installer, 'README.txt': readme };
-    files[videoName] = video.bytes;
+    const installer = '@echo off\r\nsetlocal\r\nset "WPE_DIR=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" set "WPE_DIR=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" (echo Wallpaper Engine not found.&pause&exit /b 1)\r\nset "DEST=%WPE_DIR%\\projects\\myprojects\\' + safeBatchName + '"\r\nif not exist "%DEST%" mkdir "%DEST%"\r\nrobocopy "%~dp0." "%DEST%" /E /R:1 /W:1 /XF INSTALL-ANDROID.cmd >nul\r\nif errorlevel 8 (echo Could not install the project.&pause&exit /b 1)\r\nstart "" /D "%WPE_DIR%" "%WPE_DIR%\\launcher.exe"\r\necho Native Android-compatible Scene project installed.\r\necho Select it in Wallpaper Engine and choose Send to Mobile Device.\r\npause\r\n';
+    const readme = 'Нативный WPE Scene-проект для Android. Фоновая анимация записана строго от первого до последнего ключа, без спектра. Аудиовизуализатор рисуется нативным шейдером WPE и получает живой спектр через Scene API.\r\n\r\nРаспакуйте ZIP, запустите INSTALL-ANDROID.cmd, выберите вариант «Android Scene» в Wallpaper Engine и нажмите «Отправить на мобильное устройство».\r\n';
+    const files = nativeSceneFiles(video, preview);
+    files['INSTALL-ANDROID.cmd'] = installer; files['README.txt'] = readme;
     const blob = zipStore(files);
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = projectFileStem() + '-android-wpe.zip'; link.click();
-    setTimeout(() => URL.revokeObjectURL(link.href), 2000); toast('Android Video-проект готов');
-  } catch (error) { androidExportButton.disabled = false; androidExportButton.textContent = 'Android'; toast(error.message || 'Не удалось записать Android-версию'); }
+    setTimeout(() => URL.revokeObjectURL(link.href), 2000); toast('Android Scene с живым спектром готов');
+  } catch (error) { androidExportButton.disabled = false; androidExportButton.textContent = 'Android Scene'; toast(error.message || 'Не удалось записать Android Scene'); }
 }
 androidExportButton.onclick = exportAndroidPackage;
 exportTools.append(wallpaperFolderButton, wallpaperZipButton, androidExportButton);

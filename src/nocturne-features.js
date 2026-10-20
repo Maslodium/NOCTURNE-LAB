@@ -579,6 +579,7 @@ let audioLastSeen = 0;
 let editorAudioGain = 1;
 let editorAudioUpdatedAt = performance.now();
 let featureClock = 0;
+let forceIdleSpectrum = false;
 
 function wallpaperAudioListener(samples) {
   audioInputSeen = true;
@@ -628,7 +629,7 @@ function updateEditorAudio(layer) {
     const idle = .16 + .12 * Math.sin(featureClock * 1.8 + index * .37) + .05 * Math.sin(featureClock * .7 + index * .11);
     const target = audioInputSeen
       ? Math.pow(clamp(gated * editorAudioGain * (layer.audioBoost || 1) * tone, 0, 1), .72)
-      : (layer.idleMotion ? Math.max(.02, idle) : 0);
+      : ((layer.idleMotion || forceIdleSpectrum) ? Math.max(.02, idle) : 0);
     const tau = target > audioCurrent[index] ? attack : release;
     const alpha = 1 - Math.exp(-delta / Math.max(.008, tau));
     audioCurrent[index] += (target - audioCurrent[index]) * alpha;
@@ -1211,7 +1212,7 @@ async function buildWallpaperEnginePackage() {
   const applyScript = '@echo off\r\nsetlocal\r\nset "WPE=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" set "WPE=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine\\wallpaper64.exe"\r\nif not exist "%WPE%" (echo Wallpaper Engine not found in the default Steam folder.&echo Import this folder through Wallpaper Engine: Open Wallpaper - Open offline wallpaper.&pause&exit /b 1)\r\nfor %%I in ("%WPE%") do set "WPE_DIR=%%~dpI"\r\npushd "%WPE_DIR%"\r\nstart "" /D "%WPE_DIR%" "%WPE%" -control openWallpaper -file "%~dp0project.json"\r\npopd\r\n';
   const safeBatchName = projectFileStem().replace(/%/g, '%%').replace(/!/g, '').replace(/[&()^]/g, '-');
   const publishScript = '@echo off\r\nsetlocal\r\nset "WPE_DIR=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" set "WPE_DIR=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" (echo Wallpaper Engine not found in the default Steam folder.&pause&exit /b 1)\r\nset "DEST=%WPE_DIR%\\projects\\myprojects\\' + safeBatchName + '"\r\nif not exist "%DEST%" mkdir "%DEST%"\r\nrobocopy "%~dp0." "%DEST%" /E /R:1 /W:1 /XF INSTALL-PUBLISH.cmd >nul\r\nif errorlevel 8 (echo Could not install the project.&pause&exit /b 1)\r\npushd "%WPE_DIR%"\r\nstart "" /D "%WPE_DIR%" "%WPE_DIR%\\launcher.exe"\r\npopd\r\necho Project installed to:\r\necho %DEST%\r\necho Open Wallpaper Engine editor, then Workshop - Share wallpaper on Workshop.\r\necho To transfer it to Android: select the wallpaper - Send to Mobile Device.\r\npause\r\n';
-  const readme = 'Готовый редактируемый проект Wallpaper Engine. Если это ZIP — сначала распакуйте его целиком.\r\n1. INSTALL-PUBLISH.cmd копирует проект в wallpaper_engine\\projects\\myprojects и запускает Wallpaper Engine. Затем откройте редактор: Workshop > Share wallpaper on Workshop.\r\n2. APPLY-WALLPAPER.cmd сразу применяет обои к рабочему столу.\r\n3. preview.png — автоматически созданная обложка проекта.\r\n\r\nТелефон: в Wallpaper Engine для Windows выберите обои > Send to Mobile Device. Для ручной передачи выберите Export .mpkg и импортируйте файл из Downloads на Android.\r\nИсточник звука: Wallpaper Engine > Настройки > Основные > Медиа > Устройство записи аудио.\r\nПанель свойств обоев управляет каналом, чувствительностью спектра, адаптацией экрана и производительностью.\r\nAndroid: выдайте Wallpaper Engine разрешение на запись аудио.\r\nДля мобильного режима без аудиодоступа включите «Движение без аудиосигнала».\r\n';
+  const readme = 'Готовый редактируемый проект Wallpaper Engine для Windows. Если это ZIP — сначала распакуйте его целиком.\r\n1. INSTALL-PUBLISH.cmd копирует проект в wallpaper_engine\\projects\\myprojects и запускает Wallpaper Engine. Затем откройте редактор: Workshop > Share wallpaper on Workshop.\r\n2. APPLY-WALLPAPER.cmd сразу применяет обои к рабочему столу.\r\n3. preview.png — автоматически созданная обложка проекта.\r\n\r\nИсточник звука: Wallpaper Engine > Настройки > Основные > Медиа > Устройство записи аудио.\r\nПанель свойств обоев управляет каналом, чувствительностью спектра, адаптацией экрана и производительностью.\r\nВажно: WPE Android не поддерживает Web-обои. Для телефона используйте отдельную кнопку «Android» в NOCTURNE / LAB — она создаёт совместимый Video-проект.\r\n';
   const preview = await createWallpaperPreview();
   return { 'index.html': index, 'project.json': manifest, 'preview.png': preview, 'APPLY-WALLPAPER.cmd': applyScript, 'INSTALL-PUBLISH.cmd': publishScript, 'README.txt': readme };
 }
@@ -1241,11 +1242,75 @@ async function exportWallpaperFolder() {
 }
 
 const wallpaperFolderButton = document.createElement('button'); wallpaperFolderButton.type = 'button'; wallpaperFolderButton.textContent = 'WPE проект';
-wallpaperFolderButton.title = 'Сохранить редактируемый проект для публикации в Workshop';
-wallpaperFolderButton.title = 'Записать готовый проект Wallpaper Engine прямо в выбранную папку'; wallpaperFolderButton.onclick = exportWallpaperFolder;
+wallpaperFolderButton.title = 'Записать редактируемый проект Wallpaper Engine прямо в выбранную папку'; wallpaperFolderButton.onclick = exportWallpaperFolder;
 const wallpaperZipButton = document.createElement('button'); wallpaperZipButton.type = 'button'; wallpaperZipButton.textContent = 'WPE ZIP';
 wallpaperZipButton.title = 'Скачать переносимый ZIP Wallpaper Engine'; wallpaperZipButton.onclick = exportWallpaperZip;
-exportTools.append(wallpaperFolderButton, wallpaperZipButton);
+const androidExportButton = document.createElement('button'); androidExportButton.type = 'button'; androidExportButton.textContent = 'Android';
+androidExportButton.title = 'Записать совместимую с WPE Android зацикленную видеоверсию';
+
+function preferredVideoMimeType() {
+  const candidates = [
+    { type: 'video/mp4;codecs=avc1.42E01E', extension: 'mp4' },
+    { type: 'video/mp4', extension: 'mp4' },
+    { type: 'video/webm;codecs=vp9', extension: 'webm' },
+    { type: 'video/webm;codecs=vp8', extension: 'webm' },
+    { type: 'video/webm', extension: 'webm' }
+  ];
+  return candidates.find(candidate => typeof MediaRecorder !== 'undefined' && MediaRecorder.isTypeSupported(candidate.type)) || null;
+}
+
+async function recordMobileVideo() {
+  if (typeof MediaRecorder === 'undefined' || typeof cv.captureStream !== 'function') throw new Error('Этот браузер не поддерживает запись Canvas');
+  const format = preferredVideoMimeType(); if (!format) throw new Error('В браузере нет подходящего видеокодека');
+  const duration = clamp(Number(S.animation.duration) || 8, 1, 30), fps = Math.min(30, S.animation.fps || 30);
+  const savedScene = captureSceneState(), savedTime = S.animation.time, savedPlaying = S.animation.playing;
+  const stream = cv.captureStream(fps), chunks = [], bits = clamp(Math.round(S.w * S.h * fps * .12), 4000000, 16000000);
+  const recorder = new MediaRecorder(stream, { mimeType: format.type, videoBitsPerSecond: bits });
+  recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+  const stopped = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = event => reject(event.error || new Error('Ошибка записи')); });
+  try {
+    forceIdleSpectrum = true;
+    S.animation.time = 0; S.animation.playing = S.animation.keyframes.length > 1;
+    recorder.start(250);
+    const started = performance.now();
+    while (performance.now() - started < duration * 1000) {
+      const elapsed = Math.min(duration, (performance.now() - started) / 1000);
+      androidExportButton.textContent = Math.ceil(elapsed) + '/' + Math.ceil(duration) + ' s';
+      await new Promise(resolve => setTimeout(resolve, 200));
+    }
+    recorder.stop(); await stopped;
+    if (!chunks.length) throw new Error('Браузер не записал видеопоток');
+    return { bytes: new Uint8Array(await new Blob(chunks, { type: format.type }).arrayBuffer()), extension: format.extension };
+  } finally {
+    forceIdleSpectrum = false;
+    stream.getTracks().forEach(track => track.stop());
+    S.animation.time = savedTime; S.animation.playing = savedPlaying; applySceneState(savedScene); refreshTimeline(); sync();
+    androidExportButton.textContent = 'Android'; androidExportButton.disabled = false;
+  }
+}
+
+async function exportAndroidPackage() {
+  androidExportButton.disabled = true;
+  try {
+    setProjectName(projectNameInput.value); toast('Запись мобильного цикла началась');
+    const video = await recordMobileVideo(), preview = await createWallpaperPreview(), videoName = 'wallpaper.' + video.extension;
+    const manifest = JSON.stringify({
+      file: videoName, type: 'video', title: projectName + ' · Android',
+      description: 'Mobile video export generated by NOCTURNE / LAB.', preview: 'preview.png',
+      tags: ['Technology'], visibility: 'private'
+    }, null, 2);
+    const safeBatchName = (projectFileStem() + '-android').replace(/%/g, '%%').replace(/!/g, '').replace(/[&()^]/g, '-');
+    const installer = '@echo off\r\nsetlocal\r\nset "WPE_DIR=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" set "WPE_DIR=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" (echo Wallpaper Engine not found.&pause&exit /b 1)\r\nset "DEST=%WPE_DIR%\\projects\\myprojects\\' + safeBatchName + '"\r\nif not exist "%DEST%" mkdir "%DEST%"\r\nrobocopy "%~dp0." "%DEST%" /E /R:1 /W:1 /XF INSTALL-ANDROID.cmd >nul\r\nif errorlevel 8 (echo Could not install the project.&pause&exit /b 1)\r\nstart "" /D "%WPE_DIR%" "%WPE_DIR%\\launcher.exe"\r\necho Android-compatible Video project installed.\r\necho Select it in Wallpaper Engine and choose Send to Mobile Device.\r\npause\r\n';
+    const readme = 'Совместимый с WPE Android Video-проект. Распакуйте ZIP и запустите INSTALL-ANDROID.cmd. Затем выберите обои в Wallpaper Engine и нажмите «Отправить на мобильное устройство».\r\n\r\nЭто зацикленная видеозапись: ключевая анимация, часы и глобус сохраняются. Спектр записывается с алгоритмическим движением, потому что мобильные Video-обои не получают живой системный аудиоспектр.\r\n';
+    const files = { 'project.json': manifest, 'preview.png': preview, 'INSTALL-ANDROID.cmd': installer, 'README.txt': readme };
+    files[videoName] = video.bytes;
+    const blob = zipStore(files);
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = projectFileStem() + '-android-wpe.zip'; link.click();
+    setTimeout(() => URL.revokeObjectURL(link.href), 2000); toast('Android Video-проект готов');
+  } catch (error) { androidExportButton.disabled = false; androidExportButton.textContent = 'Android'; toast(error.message || 'Не удалось записать Android-версию'); }
+}
+androidExportButton.onclick = exportAndroidPackage;
+exportTools.append(wallpaperFolderButton, wallpaperZipButton, androidExportButton);
 
 ensureFeatureState();
 refreshTimeline();

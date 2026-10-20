@@ -21,6 +21,8 @@ The editor starts with an empty canvas. Newly added geometry uses neutral transf
 
 The exported ZIP contains a self-contained web wallpaper and `project.json`. Its audio listener follows the Wallpaper Engine web API. Wallpaper properties allow stereo, left, right, or strongest-channel capture, an extra gain multiplier, and an optional signal diagnostic overlay. The physical recording device remains a global Wallpaper Engine setting under **Settings → General → Media**. When no Wallpaper Engine audio source is present, the spectrum remains still unless idle motion was explicitly enabled.
 
+The editor includes a native **1260×2800 Nothing Phone (3)** preset with an editor-only safe-area guide. Exported wallpapers support cover, contain, and stretch fitting. The Wallpaper Engine property panel exposes audio gain, AGC, gate, attack/release, bass/treble balance, spectrum geometry, render quality, and FPS. Android Wallpaper Engine does not provide system audio input, so mobile exports use the optional idle-motion fallback.
+
 The runtime retries audio registration if the host API arrives late, applies optional automatic gain and a noise gate, and drops stale samples. Static scene layers are cached, animated wave geometry is batched into one `Path2D`, and expensive blur radii are capped for 4K playback. Idle spectrum motion is disabled by default so missing audio is not hidden.
 
 Selected layers can be centered with **В центр** or snapped to the horizontal and vertical center axes while dragging with Shift.

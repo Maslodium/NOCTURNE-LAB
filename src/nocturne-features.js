@@ -17,9 +17,35 @@ featureStyle.textContent = `
   .bend-hint { color:#a9ff68; }
   .value-edit { width:76px; height:25px; padding:2px 6px; text-align:right; font:11px ui-monospace,Consolas,monospace; }
   .font-row { display:grid; grid-template-columns:1fr auto; gap:6px; }
+  .nothing-safe-area { position:absolute; z-index:4; inset:5.5% 5% 7.5%; display:none; pointer-events:none;
+    border:1px dashed #a9ff6899; border-radius:22px; box-shadow:0 0 0 1px #0008 inset; }
+  .nothing-safe-area::before { content:'NOTHING PHONE (3) · SAFE AREA'; position:absolute; left:50%; top:8px;
+    transform:translateX(-50%); padding:3px 7px; border-radius:3px; white-space:nowrap;
+    background:#080b0ddd; color:#a9ff68; font:10px ui-monospace,Consolas,monospace; letter-spacing:.08em; }
+  .stage.nothing-phone-3 .nothing-safe-area { display:block; }
   @media(max-width:1000px){.animbar{grid-template-columns:auto auto 1fr 58px}.animbar .wide-hide{display:none}}
 `;
 document.head.appendChild(featureStyle);
+
+/* Native Phone (3) canvas. The guide is editor-only and never appears in exports. */
+const resolutionSelect = document.querySelector('#res');
+if (resolutionSelect && ![...resolutionSelect.options].some(option => option.value === '1260x2800')) {
+  const option = document.createElement('option');
+  option.value = '1260x2800'; option.textContent = '1260x2800 · Nothing Phone (3)';
+  resolutionSelect.appendChild(option);
+}
+const nothingSafeArea = document.createElement('div');
+nothingSafeArea.className = 'nothing-safe-area';
+document.querySelector('#stage')?.appendChild(nothingSafeArea);
+function updateDevicePreset() {
+  const isNothingPhone3 = S.w === 1260 && S.h === 2800;
+  document.querySelector('#stage')?.classList.toggle('nothing-phone-3', isNothingPhone3);
+  if (isNothingPhone3 && S.animation) {
+    S.animation.fps = 30;
+    animationBar?.querySelector('[data-fps]') && (animationBar.querySelector('[data-fps]').value = '30');
+  }
+}
+resolutionSelect?.addEventListener('change', () => requestAnimationFrame(updateDevicePreset));
 
 /* Use an explicit button instead of an implicit file label: this prevents stray
    chooser activation and lets the same project be selected twice in a row. */
@@ -99,7 +125,8 @@ function Spectrum(o = {}) {
   return base(Object.assign({
     id: id++, type: 'spectrum', name: 'Спектр', color: '#a9ff68', color2: '#35d7ff',
     opacity: .86, blend: 'lighter', bars: 48, height: .23, width: .72, gap: .24,
-    sensitivity: 1.35, smoothing: .72, audioBoost: 2, noiseGate: .01, autoGain: true, spectrumStyle: 'bars', mirror: true,
+    sensitivity: 1.35, smoothing: .72, attack: 70, release: 260, bassBoost: 1.15, trebleBoost: 1.2,
+    audioBoost: 2, noiseGate: .01, autoGain: true, spectrumStyle: 'bars', mirror: true,
     idleMotion: false, spectrumAngle: 0, spectrumArc: 360,
     glow: 12, glowColor: '#a9ff68', x: .5, y: .78
   }, o));
@@ -128,7 +155,8 @@ function Globe(o = {}) {
 function normalizeSpectrum(layer) {
   const defaults = {
     color: '#a9ff68', color2: '#35d7ff', opacity: .86, blend: 'lighter', bars: 48,
-    height: .23, width: .72, gap: .24, sensitivity: 1.35, smoothing: .72, audioBoost: 2, noiseGate: .01, autoGain: true,
+    height: .23, width: .72, gap: .24, sensitivity: 1.35, smoothing: .72, attack: 70, release: 260,
+    bassBoost: 1.15, trebleBoost: 1.2, audioBoost: 2, noiseGate: .01, autoGain: true,
     spectrumStyle: 'bars', mirror: true, idleMotion: false, spectrumAngle: 0, spectrumArc: 360, glow: 12,
     glowColor: '#a9ff68', x: .5, y: .78, scale: 1, rotation: 0,
     patternDensity: 1, style: 'solid', paint: 'gradient', gradientAngle: 0
@@ -407,6 +435,7 @@ const audioCurrent = new Float32Array(64);
 let audioInputSeen = false;
 let audioLastSeen = 0;
 let editorAudioGain = 1;
+let editorAudioUpdatedAt = performance.now();
 let featureClock = 0;
 
 function wallpaperAudioListener(samples) {
@@ -423,23 +452,54 @@ if (typeof window.wallpaperRegisterAudioListener === 'function') {
   window.wallpaperRegisterAudioListener(wallpaperAudioListener);
 }
 
-function spectrumValue(layer, normalizedIndex) {
-  const sourceIndex = Math.min(63, Math.max(0, Math.round(normalizedIndex * 63)));
-  const idle = .16 + .12 * Math.sin(featureClock * 1.8 + sourceIndex * .37) + .05 * Math.sin(featureClock * .7 + sourceIndex * .11);
+function sampleAudioBand(values, normalizedIndex, count) {
+  const center = clamp(normalizedIndex, 0, 1) * 63;
+  const radius = Math.max(.55, 32 / Math.max(8, count));
+  const from = Math.max(0, Math.floor(center - radius));
+  const to = Math.min(63, Math.ceil(center + radius));
+  let power = 0, weightSum = 0;
+  for (let index = from; index <= to; index++) {
+    const weight = Math.max(.08, 1 - Math.abs(index - center) / (radius + .75));
+    power += values[index] * values[index] * weight; weightSum += weight;
+  }
+  return Math.sqrt(power / Math.max(.001, weightSum));
+}
+
+function updateEditorAudio(layer) {
+  const now = performance.now();
+  const delta = clamp((now - editorAudioUpdatedAt) / 1000, 1 / 240, .1);
+  editorAudioUpdatedAt = now;
   if (audioInputSeen && performance.now() - audioLastSeen > 1200) audioInputSeen = false;
-  const raw = Math.max(0, audioTarget[sourceIndex] - (layer.noiseGate || 0));
-  const target = audioInputSeen ? Math.pow(clamp(raw * editorAudioGain * (layer.audioBoost || 1), 0, 1), .72) : (layer.idleMotion ? Math.max(.02, idle) : 0);
-  const smoothing = clamp(layer.smoothing, 0, .96);
-  audioCurrent[sourceIndex] = audioCurrent[sourceIndex] * smoothing + target * (1 - smoothing);
-  return Math.min(1.5, audioCurrent[sourceIndex] * layer.sensitivity);
+  let rms = 0;
+  for (let index = 0; index < 64; index++) rms += audioTarget[index] * audioTarget[index];
+  rms = Math.sqrt(rms / 64);
+  const desiredGain = audioInputSeen && layer.autoGain ? clamp(.2 / Math.max(.012, rms), .75, 6) : 1;
+  editorAudioGain += (desiredGain - editorAudioGain) * (desiredGain < editorAudioGain ? .2 : .045);
+  const inertia = .3 + clamp(layer.smoothing, 0, .96) * 1.7;
+  const attack = Math.max(12, layer.attack || 70) / 1000 * inertia;
+  const release = Math.max(30, layer.release || 260) / 1000 * inertia;
+  for (let index = 0; index < 64; index++) {
+    const frequency = index / 63;
+    const tone = (layer.bassBoost || 1) + ((layer.trebleBoost || 1) - (layer.bassBoost || 1)) * frequency;
+    const gate = clamp(layer.noiseGate || 0, 0, .4);
+    const gated = audioTarget[index] <= gate ? 0 : (audioTarget[index] - gate) / Math.max(.001, 1 - gate);
+    const idle = .16 + .12 * Math.sin(featureClock * 1.8 + index * .37) + .05 * Math.sin(featureClock * .7 + index * .11);
+    const target = audioInputSeen
+      ? Math.pow(clamp(gated * editorAudioGain * (layer.audioBoost || 1) * tone, 0, 1), .72)
+      : (layer.idleMotion ? Math.max(.02, idle) : 0);
+    const tau = target > audioCurrent[index] ? attack : release;
+    const alpha = 1 - Math.exp(-delta / Math.max(.008, tau));
+    audioCurrent[index] += (target - audioCurrent[index]) * alpha;
+  }
+}
+
+function spectrumValue(layer, normalizedIndex, count) {
+  return Math.min(1.5, sampleAudioBand(audioCurrent, normalizedIndex, count) * layer.sensitivity);
 }
 
 function drawSpectrum(layer) {
   normalizeSpectrum(layer);
-  if (audioInputSeen && layer.autoGain) {
-    const peak = Math.max(.001, ...audioTarget);
-    editorAudioGain = editorAudioGain * .9 + clamp(.82 / peak, 1, 8) * .1;
-  } else editorAudioGain = editorAudioGain * .9 + .1;
+  updateEditorAudio(layer);
   c.save(); transform(c, layer);
   c.globalAlpha = layer.opacity;
   c.globalCompositeOperation = layer.blend;
@@ -454,7 +514,7 @@ function drawSpectrum(layer) {
     const radius = Math.min(S.w, S.h) * layer.width * .28;
     for (let index = 0; index < count; index++) {
       const t = index / Math.max(1, count - 1);
-      const value = spectrumValue(layer, t);
+      const value = spectrumValue(layer, t, count);
       const angle = (layer.spectrumAngle - 90) * Math.PI / 180 + (t - .5) * layer.spectrumArc * Math.PI / 180;
       const inner = radius, outer = radius + value * maxHeight * .55;
       c.strokeStyle = mix(layer.color, layer.color2, t);
@@ -466,7 +526,7 @@ function drawSpectrum(layer) {
     c.lineWidth = Math.max(1, layer.patternDensity * S.w / 1920);
     c.beginPath();
     for (let index = 0; index < count; index++) {
-      const t = index / Math.max(1, count - 1), value = spectrumValue(layer, t);
+      const t = index / Math.max(1, count - 1), value = spectrumValue(layer, t, count);
       const x = (t - .5) * totalWidth, y = -value * maxHeight;
       index ? c.lineTo(x, y) : c.moveTo(x, y);
     }
@@ -474,7 +534,7 @@ function drawSpectrum(layer) {
     if (layer.mirror) { c.scale(1, -1); c.globalAlpha *= .48; c.stroke(); }
   } else {
     for (let index = 0; index < count; index++) {
-      const t = index / Math.max(1, count - 1), value = spectrumValue(layer, t);
+      const t = index / Math.max(1, count - 1), value = spectrumValue(layer, t, count);
       const height = Math.max(1, value * maxHeight);
       c.fillStyle = mix(layer.color, layer.color2, t);
       c.fillRect(-totalWidth / 2 + index * step, -height, barWidth, height);
@@ -611,7 +671,9 @@ ui = function enhancedUi() {
       row('Полосы', 'bars', 8, 64, 1) + row('Высота', 'height', .03, .65, .01, value => Math.round(value * 100) + '%') +
       row('Ширина', 'width', .1, 1.4, .01, value => Math.round(value * 100) + '%') + row('Зазор', 'gap', 0, .8, .01, value => Math.round(value * 100) + '%') +
       row('Чувствительность', 'sensitivity', .1, 4, .05, value => Number(value).toFixed(2)) + row('Усиление аудио', 'audioBoost', .25, 8, .05) +
-      row('Шумовой порог', 'noiseGate', 0, .2, .005) + row('Сглаживание', 'smoothing', 0, .94, .01, value => Math.round(value * 100) + '%') +
+      row('Шумовой порог', 'noiseGate', 0, .2, .005) + row('Общая инерция', 'smoothing', 0, .94, .01, value => Math.round(value * 100) + '%') +
+      row('Атака', 'attack', 15, 300, 5, value => value + ' мс') + row('Спад', 'release', 40, 1200, 10, value => value + ' мс') +
+      row('Низкие частоты', 'bassBoost', .25, 3, .05) + row('Высокие частоты', 'trebleBoost', .25, 3, .05) +
       row('Направление сектора', 'spectrumAngle', -180, 180, 1) + row('Размер сектора', 'spectrumArc', 5, 360, 1) +
       '<div class="row"><label><input type="checkbox" data-spectrum-bool="autoGain" ' + (layer.autoGain ? 'checked' : '') + '> Автоусиление тихого сигнала</label></div>' +
       '<div class="row"><label><input type="checkbox" data-spectrum-bool="mirror" ' + (layer.mirror ? 'checked' : '') + '> Зеркальное отражение</label></div>' +
@@ -755,6 +817,7 @@ function refreshTimeline() {
   timeInput.value = S.animation.time;
   durationInput.value = S.animation.duration;
   animationBar.querySelector('[data-easing]').checked = S.animation.easing === 'smooth';
+  animationBar.querySelector('[data-fps]').value = String(S.animation.fps || 60);
   animationBar.querySelector('.anim-time').textContent = S.animation.time.toFixed(2) + ' s';
   playButton.textContent = S.animation.playing ? '❚❚' : '▶';
   const dots = animationBar.querySelector('.key-dots');
@@ -824,7 +887,7 @@ restoreProject = function enhancedRestoreProject(project) {
   originalRestoreProject(incoming);
   S.animation = animation || { duration: 8, time: 0, playing: false, loop: true, easing: 'linear', fps: 60, keyframes: [] };
   S.animation.playing = false;
-  ensureFeatureState(); refreshTimeline(); sync();
+  ensureFeatureState(); refreshTimeline(); updateDevicePreset(); sync();
 };
 
 function crc32(bytes) {
@@ -855,23 +918,25 @@ function zipStore(files) {
 
 function wallpaperRuntimeHtml(project) {
   const data = JSON.stringify(project).replace(/</g, '\\u003c');
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{display:block;width:100%;height:100%}</style></head><body><canvas id="c"></canvas><script>
-const P=${data},cv=document.getElementById('c'),bins=new Float32Array(64),smooth=new Float32Array(64);let x=cv.getContext('2d',{alpha:false}),hasAudio=false,lastAudioAt=0,lastSignalAt=0,audioGain=1,userAudioGain=1,audioChannel='stereo',showAudioStatus=false,start=performance.now(),audioRegistered=false;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{display:block;width:100%;height:100%}</style></head><body><canvas id="c"></canvas><script>
+const P=${data},cv=document.getElementById('c'),leftBins=new Float32Array(64),rightBins=new Float32Array(64),bins=new Float32Array(64),smooth=new Float32Array(64),R={channel:'stereo',gain:1,status:false,sensitivity:null,gate:null,smoothing:null,attack:null,release:null,bass:null,treble:null,bars:null,style:'project',width:1,height:1,offsetX:0,offsetY:0,glow:1,mirror:null,autoGain:null,idle:null,fit:'cover',quality:'balanced',fps:0};let x=cv.getContext('2d',{alpha:false}),hasAudio=false,lastAudioAt=0,lastSignalAt=0,audioGain=1,audioUpdatedAt=performance.now(),audioFrameStamp=-1,start=performance.now(),audioRegistered=false;
 if(typeof FontFace==='function')(P.layers||[]).filter(l=>l.type==='clock'&&l.fontData).forEach(l=>{new FontFace(l.fontFamily,'url('+l.fontData+')').load().then(f=>document.fonts.add(f)).catch(()=>{})});
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rgb=h=>{let q=h.slice(1);return[parseInt(q.slice(0,2),16),parseInt(q.slice(2,4),16),parseInt(q.slice(4,6),16)]},mix=(a,b,t)=>{let A=rgb(a),B=rgb(b);return'rgb('+A.map((v,i)=>Math.round(v+(B[i]-v)*t))+')'};
-function wallpaperAudioListener(samples){hasAudio=true;lastAudioAt=performance.now();let peak=0;for(let i=0;i<64;i++){let left=+samples[i]||0,right=+samples[i+64]||0,value=audioChannel==='left'?left:audioChannel==='right'?right:audioChannel==='strongest'?Math.max(left,right):(left+right)*.5;bins[i]=Math.min(1,Math.max(0,value));peak=Math.max(peak,bins[i])}if(peak>.0005)lastSignalAt=lastAudioAt}
+function wallpaperAudioListener(samples){hasAudio=true;lastAudioAt=performance.now();let peak=0;for(let i=0;i<64;i++){leftBins[i]=clamp(+samples[i]||0,0,1);rightBins[i]=clamp(+samples[i+64]||0,0,1);peak=Math.max(peak,leftBins[i],rightBins[i])}if(peak>.0005)lastSignalAt=lastAudioAt}
 window.wallpaperAudioListener=window.nocturneWallpaperAudioListener=wallpaperAudioListener;
 function registerWallpaperAudio(){if(!audioRegistered&&typeof window.wallpaperRegisterAudioListener==='function'){window.wallpaperRegisterAudioListener(wallpaperAudioListener);audioRegistered=true;return true}return false}
 registerWallpaperAudio();if(!audioRegistered){let audioRegisterTimer=setInterval(()=>{if(registerWallpaperAudio())clearInterval(audioRegisterTimer)},100)}
-window.wallpaperPropertyListener={applyUserProperties:function(properties){if(properties.nocturneaudiochannel)audioChannel=String(properties.nocturneaudiochannel.value||'stereo');if(properties.nocturneaudiogain)userAudioGain=clamp(Number(properties.nocturneaudiogain.value)||1,.25,8);if(properties.nocturneaudiostatus)showAudioStatus=!!properties.nocturneaudiostatus.value}};
+window.wallpaperPropertyListener={applyUserProperties:function(p){let number=(key,target,min,max,scale=1)=>{if(p[key])R[target]=clamp(Number(p[key].value)*scale,min,max)};if(p.nocturneaudiochannel)R.channel=String(p.nocturneaudiochannel.value||'stereo');number('nocturnegain','gain',.25,8);number('nocturneaudiogain','gain',.25,8);number('nocturnesensitivity','sensitivity',.1,6);number('nocturnegate','gate',0,.4);number('nocturnesmoothing','smoothing',0,.96);number('nocturneattack','attack',12,500);number('nocturnerelease','release',30,1600);number('nocturnebass','bass',.25,4);number('nocturnetreble','treble',.25,4);number('nocturnebars','bars',8,64);number('nocturnewidth','width',.25,2.5,.01);number('nocturneheight','height',.25,2.5,.01);number('nocturneoffsetx','offsetX',-.5,.5,.01);number('nocturneoffsety','offsetY',-.5,.5,.01);number('nocturneglow','glow',0,2.5,.01);if(p.nocturnestyle)R.style=String(p.nocturnestyle.value||'project');if(p.nocturnemirror)R.mirror=!!p.nocturnemirror.value;if(p.nocturneautogain)R.autoGain=!!p.nocturneautogain.value;if(p.nocturneidlemotion)R.idle=!!p.nocturneidlemotion.value;if(p.nocturneaudiostatus)R.status=!!p.nocturneaudiostatus.value;if(p.nocturnefit)R.fit=String(p.nocturnefit.value||'cover');if(p.nocturnequality){R.quality=String(p.nocturnequality.value||'balanced');resize()}if(p.nocturnefps)R.fps=Number(p.nocturnefps.value)||0}};
 function clone(v){return JSON.parse(JSON.stringify(v))}function iv(a,b,t){if(typeof a==='number'&&typeof b==='number')return a+(b-a)*t;if(Array.isArray(a)&&Array.isArray(b)&&a.length===b.length)return a.map((v,i)=>iv(v,b[i],t));if(a&&b&&typeof a==='object'&&typeof b==='object'){let o={};new Set([...Object.keys(a),...Object.keys(b)]).forEach(k=>o[k]=iv(a[k],b[k],t));return o}return t<.5?clone(a):clone(b)}
 function sceneAt(t){let base={canvas:P.canvas,layers:P.layers},a=P.animation,f=a?.keyframes||[];if(!f.length)return base;if(f.length===1)return f[0].state;f=f.slice().sort((q,w)=>q.time-w.time);if(t<=f[0].time)return f[0].state;if(t>=f[f.length-1].time)return f[f.length-1].state;let i=f.findIndex(q=>q.time>=t),l=f[i-1],r=f[i],u=(t-l.time)/(r.time-l.time);if(a.easing==='smooth')u=u*u*(3-2*u);return iv(l.state,r.state,u)}
 function tr(l){x.translate(l.x*P.canvas.w,l.y*P.canvas.h);x.rotate(l.rotation*Math.PI/180);x.scale(l.scale*(l.scaleX||1),l.scale*(l.scaleY||1))}function pull(l,u,t){let r=Math.max(.025,l.anchorRadius||.14),o={x:0,y:0};(l.bendAnchors||[]).forEach(a=>{let du=(u-a.u)/r,dt=(t-a.t)/r,k=Math.exp(-(du*du+dt*dt)*1.8),f=Math.max(.01,l.bendFeather||.12),sd=l.bendSide==='left'?a.u-u:l.bendSide==='right'?u-a.u:l.bendSide==='top'?a.t-t:l.bendSide==='bottom'?t-a.t:f;if(l.bendSide&&l.bendSide!=='all')k*=clamp(sd/f+.5,0,1);if(l.bendAxis!=='vertical')o.x+=(a.dx||0)*P.canvas.w*k;if(l.bendAxis!=='horizontal')o.y+=(a.dy||0)*P.canvas.h*k});return o}function gp(l,u,t){let W=P.canvas.w*1.18,H=P.canvas.h*.92,d=Math.pow(t,1+l.perspective*2);return{x:(u-.5)*W*(1+(1-d)*l.perspective*1.6),y:(d-.5)*H+Math.sin(u*Math.PI*2+t*4)*l.bend*P.canvas.h*(1-t*.55)}}
 function wave(l){let path=new Path2D(),steps=Math.min(110,Math.max(64,Math.round(12000/Math.max(1,l.lines))));for(let n=0;n<l.lines;n++){let k=n/(l.lines-1)-.5;for(let i=0;i<=steps;i++){let u=i/steps,base=k*l.spread*P.canvas.h+Math.sin(u*Math.PI*2*l.frequency+l.phase+k*l.twist*8)*l.amplitude*P.canvas.h*Math.sin(Math.PI*u)+Math.sin(u*Math.PI*4+l.phase*.45)*l.amplitude*P.canvas.h*.18+Math.sin(u*Math.PI*2+l.phase+k*3)*k*l.twist*P.canvas.h*.17,ap=(l.anchors||[]).reduce((s,a)=>s+a.dy*P.canvas.h*Math.exp(-Math.pow((u-a.u)/(l.anchorRadius||.1),2)*2.2),0),px=(u-.5)*P.canvas.w*1.35,py=base+ap;i?path.lineTo(px,py):path.moveTo(px,py)}}let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*Math.min(1,100/Math.max(1,l.lines))*(glow?.7:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.min(24,Math.max(2,(l.glow||0)*P.canvas.w/1920))+'px)':'none';x.strokeStyle=glow?l.glowColor:l.color;x.lineWidth=l.width*P.canvas.w/1920*(glow?2.2:1);x.stroke(path);x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
 function grid(l){let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*(glow?.68:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.max(2,(l.glow||0)*P.canvas.w/1920)+'px)':'none';x.lineWidth=l.width*P.canvas.w/1920*(glow?2.1:1);let R=l.lines,C=Math.round(R*1.55);for(let r=0;r<=R;r++){let t=r/R;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,t):l.color);x.beginPath();for(let i=0;i<=100;i++){let u=i/100,p=gp(l,u,t),q=pull(l,u,t);i?x.lineTo(p.x+q.x,p.y+q.y):x.moveTo(p.x+q.x,p.y+q.y)}x.stroke()}for(let q=0;q<=C;q++){let u=q/C;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,u):l.color);x.beginPath();for(let i=0;i<=70;i++){let t=i/70,p=gp(l,u,t),d=pull(l,u,t);i?x.lineTo(p.x+d.x,p.y+d.y):x.moveTo(p.x+d.x,p.y+d.y)}x.stroke()}x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
 function spot(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;let r=l.radius*P.canvas.w,g=x.createRadialGradient(0,0,r*(1-l.softness),0,0,r),A=rgb(l.color),B=rgb(l.color2);g.addColorStop(0,'rgba('+A.join(',')+',1)');g.addColorStop(.52,'rgba('+B.join(',')+',.62)');g.addColorStop(1,'rgba('+B.join(',')+',0)');x.scale(l.stretch,1);x.fillStyle=g;x.fillRect(-r,-r,r*2,r*2);x.restore()}
-function spectrum(l,time){if(hasAudio&&performance.now()-lastAudioAt>1200)hasAudio=false;let peak=Math.max(.001,...bins),desired=l.autoGain===false?1:clamp(.82/peak,1,8);audioGain=audioGain*.9+desired*.1;x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.shadowBlur=Math.min(20,(l.glow||0)*P.canvas.w/1920);x.shadowColor=l.glowColor;let n=Math.round(clamp(l.bars||48,8,64)),W=l.width*P.canvas.w,H=l.height*P.canvas.h,s=W/n,bw=s*(1-l.gap),values=[],sm=l.smoothing??.72;for(let i=0;i<n;i++){let t=i/(n-1),j=Math.round(t*63),idle=.16+.12*Math.sin(time*1.8+j*.37)+.05*Math.sin(time*.7+j*.11),raw=Math.max(0,bins[j]-(l.noiseGate||0)),target=hasAudio?Math.pow(clamp(raw*audioGain*userAudioGain*(l.audioBoost||2),0,1),.72):(l.idleMotion?Math.max(.02,idle):0);smooth[j]=smooth[j]*sm+target*(1-sm);values.push(Math.min(1.5,smooth[j]*(l.sensitivity||1.35)))}if(l.spectrumStyle==='line'){let line=sign=>{x.beginPath();for(let i=0;i<n;i++){let t=i/(n-1),px=(t-.5)*W,py=sign*values[i]*H;i?x.lineTo(px,py):x.moveTo(px,py)}x.stroke()};x.strokeStyle=l.color;x.lineWidth=Math.max(1,(l.patternDensity||1)*P.canvas.w/1920);line(-1);if(l.mirror){x.globalAlpha=l.opacity*.48;line(1)}}else for(let i=0;i<n;i++){let t=i/(n-1),v=values[i];x.fillStyle=mix(l.color,l.color2,t);if(l.spectrumStyle==='radial'){let r=Math.min(P.canvas.w,P.canvas.h)*l.width*.28,a=((l.spectrumAngle||0)-90)*Math.PI/180+(t-.5)*(l.spectrumArc||360)*Math.PI/180;x.strokeStyle=x.fillStyle;x.lineWidth=Math.max(1,bw*.32);x.beginPath();x.moveTo(Math.cos(a)*r,Math.sin(a)*r);x.lineTo(Math.cos(a)*(r+v*H*.55),Math.sin(a)*(r+v*H*.55));x.stroke()}else{x.fillRect(-W/2+i*s,-v*H,bw,Math.max(1,v*H));if(l.mirror){x.globalAlpha=l.opacity*.48;x.fillRect(-W/2+i*s,0,bw,Math.max(1,v*H));x.globalAlpha=l.opacity}}}x.restore()}
-function audioStatus(){if(!showAudioStatus)return;let now=performance.now(),callback=audioRegistered&&now-lastAudioAt<1500,signal=now-lastSignalAt<1500,label=signal?'AUDIO: SIGNAL OK':callback?'AUDIO: SOURCE IS SILENT':'AUDIO: NO INPUT - SETTINGS > GENERAL > MEDIA',color=signal?'#73ffb0':callback?'#ffd166':'#ff6b7a';x.save();x.setTransform(1,0,0,1,0,0);x.globalAlpha=.92;x.font=Math.max(13,P.canvas.w/120)+'px Segoe UI, sans-serif';let pad=14,w=x.measureText(label).width+pad*2,h=38;x.fillStyle='rgba(0,0,0,.72)';x.fillRect(18,18,w,h);x.fillStyle=color;x.textBaseline='middle';x.fillText(label,18+pad,18+h/2);x.restore()}
+function updateAudio(l,now){if(now-audioFrameStamp<4)return;let dt=clamp((now-audioUpdatedAt)/1000,1/240,.1);audioUpdatedAt=now;audioFrameStamp=now;if(hasAudio&&now-lastAudioAt>1200)hasAudio=false;let rms=0;for(let i=0;i<64;i++){let left=leftBins[i],right=rightBins[i],value=R.channel==='left'?left:R.channel==='right'?right:R.channel==='strongest'?Math.max(left,right):(left+right)*.5;bins[i]=value;rms+=value*value}rms=Math.sqrt(rms/64);let auto=R.autoGain===null?l.autoGain:R.autoGain,desired=hasAudio&&auto?clamp(.2/Math.max(.012,rms),.75,6):1;audioGain+=(desired-audioGain)*(desired<audioGain ? .2 : .045);let sm=R.smoothing===null?(l.smoothing??.72):R.smoothing,inertia=.3+clamp(sm,0,.96)*1.7,attack=Math.max(12,R.attack===null?(l.attack||70):R.attack)/1000*inertia,release=Math.max(30,R.release===null?(l.release||260):R.release)/1000*inertia,gate=R.gate===null?(l.noiseGate||0):R.gate,bass=R.bass===null?(l.bassBoost||1):R.bass,treble=R.treble===null?(l.trebleBoost||1):R.treble,idleOn=R.idle===null?l.idleMotion:R.idle;for(let i=0;i<64;i++){let f=i/63,tone=bass+(treble-bass)*f,gated=bins[i]<=gate?0:(bins[i]-gate)/Math.max(.001,1-gate),idle=.16+.12*Math.sin(now/1000*1.8+i*.37)+.05*Math.sin(now/1000*.7+i*.11),target=hasAudio?Math.pow(clamp(gated*audioGain*R.gain*(l.audioBoost||1)*tone,0,1),.72):(idleOn?Math.max(.02,idle):0),tau=target>smooth[i]?attack:release,alpha=1-Math.exp(-dt/Math.max(.008,tau));smooth[i]+=(target-smooth[i])*alpha}}
+function sampleBand(t,n){let center=clamp(t,0,1)*63,radius=Math.max(.55,32/Math.max(8,n)),from=Math.max(0,Math.floor(center-radius)),to=Math.min(63,Math.ceil(center+radius)),power=0,weights=0;for(let i=from;i<=to;i++){let weight=Math.max(.08,1-Math.abs(i-center)/(radius+.75));power+=smooth[i]*smooth[i]*weight;weights+=weight}return Math.sqrt(power/Math.max(.001,weights))}
+function spectrum(l,time){let now=performance.now();updateAudio(l,now);let L=Object.assign({},l,{x:l.x+R.offsetX,y:l.y+R.offsetY}),style=R.style==='project'?l.spectrumStyle:R.style,mirror=R.mirror===null?l.mirror:R.mirror;x.save();tr(L);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.shadowBlur=Math.min(24,(l.glow||0)*R.glow*P.canvas.w/1920);x.shadowColor=l.glowColor;let n=Math.round(clamp(R.bars===null?(l.bars||48):R.bars,8,64)),W=l.width*R.width*P.canvas.w,H=l.height*R.height*P.canvas.h,s=W/n,bw=s*(1-l.gap),values=[],sensitivity=R.sensitivity===null?(l.sensitivity||1.35):R.sensitivity;for(let i=0;i<n;i++){let t=i/(n-1);values.push(Math.min(1.5,sampleBand(t,n)*sensitivity))}if(style==='line'){let line=sign=>{x.beginPath();for(let i=0;i<n;i++){let t=i/(n-1),px=(t-.5)*W,py=sign*values[i]*H;i?x.lineTo(px,py):x.moveTo(px,py)}x.stroke()};x.strokeStyle=l.color;x.lineWidth=Math.max(1,(l.patternDensity||1)*P.canvas.w/1920);line(-1);if(mirror){x.globalAlpha=l.opacity*.48;line(1)}}else for(let i=0;i<n;i++){let t=i/(n-1),v=values[i];x.fillStyle=mix(l.color,l.color2,t);if(style==='radial'){let r=Math.min(P.canvas.w,P.canvas.h)*l.width*R.width*.28,a=((l.spectrumAngle||0)-90)*Math.PI/180+(t-.5)*(l.spectrumArc||360)*Math.PI/180;x.strokeStyle=x.fillStyle;x.lineWidth=Math.max(1,bw*.32);x.beginPath();x.moveTo(Math.cos(a)*r,Math.sin(a)*r);x.lineTo(Math.cos(a)*(r+v*H*.55),Math.sin(a)*(r+v*H*.55));x.stroke()}else{x.fillRect(-W/2+i*s,-v*H,bw,Math.max(1,v*H));if(mirror){x.globalAlpha=l.opacity*.48;x.fillRect(-W/2+i*s,0,bw,Math.max(1,v*H));x.globalAlpha=l.opacity}}}x.restore()}
+function audioStatus(){if(!R.status)return;let now=performance.now(),callback=audioRegistered&&now-lastAudioAt<1500,signal=now-lastSignalAt<1500,label=signal?'AUDIO: SIGNAL OK':callback?'AUDIO: SOURCE IS SILENT':'AUDIO: NO INPUT - SETTINGS > GENERAL > MEDIA',color=signal?'#73ffb0':callback?'#ffd166':'#ff6b7a';x.save();x.setTransform(1,0,0,1,0,0);x.globalAlpha=.92;x.font=Math.max(13,cv.width/120)+'px Segoe UI, sans-serif';let pad=14,w=x.measureText(label).width+pad*2,h=38;x.fillStyle='rgba(0,0,0,.72)';x.fillRect(18,18,w,h);x.fillStyle=color;x.textBaseline='middle';x.fillText(label,18+pad,18+h/2);x.restore()}
 function clock(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.fillStyle=l.color;x.shadowBlur=Math.min(20,(l.glow||0)*P.canvas.w/1920);x.shadowColor=l.glowColor;x.textBaseline='middle';let d=new Date(),to={hour:'2-digit',minute:'2-digit',second:l.showSeconds?'2-digit':undefined,hour12:l.timeFormat==='12'},dao=l.dateFormat==='numeric'?{year:'numeric',month:'2-digit',day:'2-digit'}:l.dateFormat==='weekday'?{weekday:'long',year:'numeric',month:'long',day:'numeric'}:{year:'numeric',month:'long',day:'numeric'},time=new Intl.DateTimeFormat(l.locale||'ru-RU',to).format(d),date=new Intl.DateTimeFormat(l.locale||'ru-RU',dao).format(d);if(l.uppercase){time=time.toUpperCase();date=date.toUpperCase()}let text=(value,y,size,color)=>{x.font=(size===l.fontSize?(l.fontWeight||600)+' ':'')+size+'px "'+(l.fontFamily||'Segoe UI').replace(/"/g,'')+'"';x.fillStyle=color;x.textAlign=l.textAlign||'center';x.fillText(value,0,y)};text(time,l.showDate?-l.fontSize*(l.lineGap||.42)*.5:0,l.fontSize,l.color);if(l.showDate)text(date,l.fontSize*(l.lineGap||.42)*1.05,Math.max(12,l.fontSize*.34),l.color2);x.restore()}
 function globe(l,time){x.save();tr(l);x.globalCompositeOperation=l.blend;x.lineWidth=(l.width||1)*P.canvas.w/1920;x.shadowBlur=(l.glow||0)*P.canvas.w/1920;x.shadowColor=l.glowColor;x.strokeStyle=l.color;let R=Math.min(P.canvas.w,P.canvas.h)*(l.radius||.25),spin=((l.spin||0)+(l.autoRotate?time*(l.rotateSpeed||8):0))*Math.PI/180,tilt=(l.tilt||0)*Math.PI/180,proj=(la,lo)=>{let px=Math.cos(la)*Math.sin(lo+spin),py=Math.sin(la),pz=Math.cos(la)*Math.cos(lo+spin),ry=py*Math.cos(tilt)-pz*Math.sin(tilt),rz=py*Math.sin(tilt)+pz*Math.cos(tilt),q=1/Math.max(.35,1+rz*(l.perspective||0));return{x:px*R*q,y:ry*R*(l.flatten||1)*q,z:rz}};let trace=pts=>{for(let pass=0;pass<2;pass++){x.globalAlpha=l.opacity*(pass?(l.backOpacity||.18):1);x.beginPath();let active=false;pts.forEach(p=>{let wanted=pass?p.z>0:p.z<=0;if(wanted){active?x.lineTo(p.x,p.y):x.moveTo(p.x,p.y);active=true}else active=false});x.stroke()}};for(let i=1;i<(l.latitudes||12);i++){let pts=[],la=-Math.PI/2+Math.PI*i/l.latitudes;for(let s=0;s<=72;s++)pts.push(proj(la,Math.PI*2*s/72));trace(pts)}for(let i=0;i<(l.longitudes||20);i++){let pts=[],lo=Math.PI*2*i/l.longitudes;for(let s=0;s<=72;s++)pts.push(proj(-Math.PI/2+Math.PI*s/72,lo));trace(pts)}x.restore()}
 const staticMode=(P.animation?.keyframes||[]).length<=1,staticCanvas=document.createElement('canvas'),staticContext=staticCanvas.getContext('2d',{alpha:false});let staticReady=false;staticCanvas.width=P.canvas.w;staticCanvas.height=P.canvas.h;
@@ -879,7 +944,7 @@ function background(bg){if(bg.bgMode==='gradient'){let g=x.createLinearGradient(
 function reactive(l){return l.type==='spectrum'||l.type==='clock'||(l.type==='globe'&&l.autoRotate)}
 function layer(l,sec){if(l.type==='wave')wave(l);else if(l.type==='grid')grid(l);else if(l.type==='spot')spot(l);else if(l.type==='spectrum')spectrum(l,sec);else if(l.type==='clock')clock(l);else if(l.type==='globe')globe(l,sec)}
 function buildStatic(s){let main=x;x=staticContext;x.setTransform(1,0,0,1,0,0);x.globalAlpha=1;x.globalCompositeOperation='source-over';x.filter='none';background(s.canvas||P.canvas);(s.layers||P.layers).forEach(l=>{if(l.visible&&!reactive(l))layer(l,0)});x=main;staticReady=true}
-function resize(){let d=Math.min(1.5,devicePixelRatio||1);cv.width=Math.max(1,innerWidth*d);cv.height=Math.max(1,innerHeight*d)}addEventListener('resize',resize);resize();let last=0;function frame(now){requestAnimationFrame(frame);let fps=P.animation?.fps||60;if(now-last<1000/fps)return;last=now;let sec=(now-start)/1000,d=P.animation?.duration||8,t=P.animation?.loop===false?Math.min(sec,d):sec%d,s=sceneAt(t),sx=cv.width/P.canvas.w,sy=cv.height/P.canvas.h;x.setTransform(sx,0,0,sy,0,0);x.globalAlpha=1;x.globalCompositeOperation='source-over';x.filter='none';if(staticMode){if(!staticReady)buildStatic(sceneAt(0));x.drawImage(staticCanvas,0,0,P.canvas.w,P.canvas.h);(s.layers||P.layers).forEach(l=>{if(l.visible&&reactive(l))layer(l,sec)})}else{background(s.canvas||P.canvas);(s.layers||P.layers).forEach(l=>{if(l.visible)layer(l,sec)})}audioStatus()}requestAnimationFrame(frame);
+function resize(){let cap=R.quality==='eco'?1:R.quality==='high'?1.5:1.25,d=Math.min(cap,devicePixelRatio||1);cv.width=Math.max(1,Math.round(innerWidth*d));cv.height=Math.max(1,Math.round(innerHeight*d))}addEventListener('resize',resize);resize();let last=0;function frame(now){requestAnimationFrame(frame);let fps=R.fps||P.animation?.fps||60;if(now-last<1000/fps)return;last=now;let sec=(now-start)/1000,d=P.animation?.duration||8,t=P.animation?.loop===false?Math.min(sec,d):sec%d,s=sceneAt(t),sx=cv.width/P.canvas.w,sy=cv.height/P.canvas.h,scale=R.fit==='stretch'?0:R.fit==='contain'?Math.min(sx,sy):Math.max(sx,sy),tx=R.fit==='stretch'?0:(cv.width-P.canvas.w*scale)/2,ty=R.fit==='stretch'?0:(cv.height-P.canvas.h*scale)/2;x.setTransform(1,0,0,1,0,0);x.globalAlpha=1;x.globalCompositeOperation='source-over';x.filter='none';x.fillStyle='#000';x.fillRect(0,0,cv.width,cv.height);x.setTransform(R.fit==='stretch'?sx:scale,0,0,R.fit==='stretch'?sy:scale,tx,ty);if(staticMode){if(!staticReady)buildStatic(sceneAt(0));x.drawImage(staticCanvas,0,0,P.canvas.w,P.canvas.h);(s.layers||P.layers).forEach(l=>{if(l.visible&&reactive(l))layer(l,sec)})}else{background(s.canvas||P.canvas);(s.layers||P.layers).forEach(l=>{if(l.visible)layer(l,sec)})}audioStatus()}requestAnimationFrame(frame);
 <\/script></body></html>`;
 }
 
@@ -887,19 +952,55 @@ function exportWallpaperEngine() {
   const project = projectObject();
   project.animation.playing = false;
   const index = wallpaperRuntimeHtml(project);
+  const spectrumLayer = project.layers.find(layer => layer.type === 'spectrum') || normalizeSpectrum({});
+  const nothingPhone3 = project.canvas.w === 1260 && project.canvas.h === 2800;
   const manifest = JSON.stringify({
-    file: 'index.html', type: 'web', title: 'NOCTURNE / LAB Animated Wallpaper', supportsaudioprocessing: true,
-    description: 'Generated by NOCTURNE / LAB', preview: '', visibility: 'private',
+    file: 'index.html', type: 'web', title: nothingPhone3 ? 'NOCTURNE / LAB — Nothing Phone (3)' : 'NOCTURNE / LAB Animated Wallpaper', supportsaudioprocessing: true,
+    description: 'Generated by NOCTURNE / LAB. Adaptive audio visualizer and mobile-safe layout.', preview: '', visibility: 'private',
     general: { properties: {
-      nocturneaudiochannel: { index: 0, order: 100, text: 'Канал перехвата аудио', type: 'combo', value: 'stereo', options: [
+      nocturneaudioheading: { order: 90, text: '<h3>Аудио и эквалайзер</h3>', type: 'text' },
+      nocturneaudiochannel: { index: 0, order: 100, text: 'Канал перехвата', type: 'combo', value: 'stereo', options: [
         { label: 'Стерео (среднее)', value: 'stereo' }, { label: 'Левый канал', value: 'left' },
         { label: 'Правый канал', value: 'right' }, { label: 'Сильнейший канал', value: 'strongest' }
       ] },
-      nocturneaudiogain: { index: 1, order: 101, text: 'Усиление спектра', type: 'slider', value: 1, min: .25, max: 8, step: .25, fraction: true, precision: 2 },
-      nocturneaudiostatus: { index: 2, order: 102, text: 'Диагностика аудиовхода', type: 'bool', value: false }
+      nocturnegain: { index: 1, order: 101, text: 'Входное усиление', type: 'slider', value: 1, min: .25, max: 8, step: .25, fraction: true, precision: 2 },
+      nocturneautogain: { index: 2, order: 102, text: 'Автоматическое усиление', type: 'bool', value: spectrumLayer.autoGain !== false },
+      nocturnesensitivity: { index: 3, order: 103, text: 'Чувствительность', type: 'slider', value: spectrumLayer.sensitivity || 1.35, min: .1, max: 6, step: .05, fraction: true, precision: 2 },
+      nocturnegate: { index: 4, order: 104, text: 'Шумовой порог', type: 'slider', value: spectrumLayer.noiseGate || 0, min: 0, max: .4, step: .005, fraction: true, precision: 3 },
+      nocturnesmoothing: { index: 5, order: 105, text: 'Общая инерция', type: 'slider', value: spectrumLayer.smoothing ?? .72, min: 0, max: .96, step: .01, fraction: true, precision: 2 },
+      nocturneattack: { index: 6, order: 106, text: 'Атака, мс', type: 'slider', value: spectrumLayer.attack || 70, min: 12, max: 500, step: 2 },
+      nocturnerelease: { index: 7, order: 107, text: 'Спад, мс', type: 'slider', value: spectrumLayer.release || 260, min: 30, max: 1600, step: 10 },
+      nocturnebass: { index: 8, order: 108, text: 'Низкие частоты', type: 'slider', value: spectrumLayer.bassBoost || 1, min: .25, max: 4, step: .05, fraction: true, precision: 2 },
+      nocturnetreble: { index: 9, order: 109, text: 'Высокие частоты', type: 'slider', value: spectrumLayer.trebleBoost || 1, min: .25, max: 4, step: .05, fraction: true, precision: 2 },
+      nocturneaudiostatus: { index: 10, order: 110, text: 'Диагностика аудиовхода', type: 'bool', value: false },
+      nocturnevisualheading: { order: 190, text: '<h3>Вид эквалайзера</h3>', type: 'text' },
+      nocturnestyle: { index: 11, order: 200, text: 'Режим отображения', type: 'combo', value: 'project', options: [
+        { label: 'Как в проекте', value: 'project' }, { label: 'Столбцы', value: 'bars' },
+        { label: 'Линия', value: 'line' }, { label: 'Радиальный', value: 'radial' }
+      ] },
+      nocturnebars: { index: 12, order: 201, text: 'Количество полос', type: 'slider', value: spectrumLayer.bars || 48, min: 8, max: 64, step: 1 },
+      nocturnewidth: { index: 13, order: 202, text: 'Ширина, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
+      nocturneheight: { index: 14, order: 203, text: 'Высота, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
+      nocturneoffsetx: { index: 15, order: 204, text: 'Смещение X, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
+      nocturneoffsety: { index: 16, order: 205, text: 'Смещение Y, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
+      nocturneglow: { index: 17, order: 206, text: 'Свечение, %', type: 'slider', value: 100, min: 0, max: 250, step: 5 },
+      nocturnemirror: { index: 18, order: 207, text: 'Зеркальное отражение', type: 'bool', value: spectrumLayer.mirror !== false },
+      nocturneidlemotion: { index: 19, order: 208, text: 'Движение без аудиосигнала', type: 'bool', value: false },
+      nocturnelayoutheading: { order: 290, text: '<h3>Экран и производительность</h3>', type: 'text' },
+      nocturnefit: { index: 20, order: 300, text: 'Адаптация к экрану', type: 'combo', value: 'cover', options: [
+        { label: 'Заполнить без искажений', value: 'cover' }, { label: 'Вместить целиком', value: 'contain' },
+        { label: 'Растянуть', value: 'stretch' }
+      ] },
+      nocturnequality: { index: 21, order: 301, text: 'Качество рендера', type: 'combo', value: nothingPhone3 ? 'eco' : 'balanced', options: [
+        { label: 'Экономное / телефон', value: 'eco' }, { label: 'Сбалансированное', value: 'balanced' },
+        { label: 'Высокое', value: 'high' }
+      ] },
+      nocturnefps: { index: 22, order: 302, text: 'Ограничение FPS', type: 'combo', value: String(nothingPhone3 ? 30 : (project.animation.fps || 60)), options: [
+        { label: '24 FPS', value: '24' }, { label: '30 FPS', value: '30' }, { label: '60 FPS', value: '60' }
+      ] }
     } }
   }, null, 2);
-  const blob = zipStore({ 'index.html': index, 'project.json': manifest, 'README.txt': 'Распакуйте папку и перетащите index.html в Create Wallpaper в Wallpaper Engine.\\r\\nИсточник звука выбирается в Wallpaper Engine: Настройки > Основные > Медиа > Устройство записи аудио.\\r\\nВ свойствах обоев доступны канал, усиление и диагностический индикатор аудиовхода.\\r\\n' });
+  const blob = zipStore({ 'index.html': index, 'project.json': manifest, 'README.txt': 'Распакуйте папку и перетащите index.html в Create Wallpaper в Wallpaper Engine.\\r\\nИсточник звука выбирается в Wallpaper Engine: Настройки > Основные > Медиа > Устройство записи аудио.\\r\\nПанель свойств обоев управляет аудио, видом эквалайзера, адаптацией экрана и производительностью.\\r\\nNothing Phone (3): 1260x2800. Wallpaper Engine для Android не передаёт системный аудиосигнал, поэтому используйте «Движение без аудиосигнала» как мобильный режим.\\r\\n' });
   const link = document.createElement('a');
   link.href = URL.createObjectURL(blob); link.download = 'nocturne-wallpaper-engine.zip'; link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 1500); toast('Проект Wallpaper Engine готов');
@@ -908,3 +1009,4 @@ animationBar.querySelector('[data-export]').onclick = exportWallpaperEngine;
 
 ensureFeatureState();
 refreshTimeline();
+updateDevicePreset();

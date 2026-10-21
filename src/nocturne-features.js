@@ -1510,8 +1510,8 @@ uniform float g_OffsetY; // {"material":"offsety","default":0,"range":[-50,50]}
 uniform float g_Glow; // {"material":"glow","default":100,"range":[0,250]}
 uniform vec3 g_ColorA; // {"material":"colora","default":"1 1 1"}
 uniform vec3 g_ColorB; // {"material":"colorb","default":"0 0.9137 1"}
-uniform float g_AudioSpectrum16Left[16];
-uniform float g_AudioSpectrum16Right[16];
+uniform float g_AudioSpectrum64Left[64];
+uniform float g_AudioSpectrum64Right[64];
 varying vec2 v_TexCoord;
 void main(){
  vec2 center=vec2(${Number(layer?.x ?? .5).toFixed(5)},${Number(layer?.y ?? .72).toFixed(5)})+vec2(g_OffsetX,g_OffsetY)/100.0;
@@ -1521,11 +1521,14 @@ void main(){
  float height=max(0.01,${spectrumHeight.toFixed(5)}*g_Height/100.0);
  float nx=p.x/width+0.5;
  float bounds=step(0.0,nx)*step(nx,1.0);
- int band=int(clamp(floor(nx*16.0),0.0,15.0));
- float audio=(g_AudioSpectrum16Left[band]+g_AudioSpectrum16Right[band])*0.5;
+ float bars=clamp(g_Bars,8.0,64.0);
+ float barIndex=floor(clamp(nx,0.0,0.99999)*bars);
+ float sampleX=(barIndex+0.5)/bars;
+ int band=int(clamp(floor(sampleX*64.0),0.0,63.0));
+ float audio=(g_AudioSpectrum64Left[band]+g_AudioSpectrum64Right[band])*0.5;
  audio*=g_Sensitivity*0.1;
- audio=clamp(pow(max(audio,0.0),0.72),0.0,1.25);
- float cell=frac(nx*clamp(g_Bars,8.0,64.0));
+ audio=clamp(pow(max(audio,0.0),1.25)*2.4,0.0,1.25);
+ float cell=frac(nx*bars);
  float gap=${Number(layer?.gap ?? .24).toFixed(5)}*0.48;
  float edgeA=smoothstep(gap,gap+0.025,cell);
  float edgeB=smoothstep(gap,gap+0.025,1.0-cell);
@@ -1535,7 +1538,8 @@ void main(){
  float inside=mirror>0.5?1.0-step(audio,abs(py)):step(-audio,py)*step(py,0.0);
  float halo=exp(-max(0.0,distanceToBar)*max(8.0,42.0-g_Glow*0.12))*0.42;
  vec3 color=mix(g_ColorA,g_ColorB,clamp(nx,0.0,1.0));
- float alpha=clamp(inside*barMask+halo*barMask,0.0,1.0)*bounds;
+ float reflectionAlpha=mirror>0.5&&py>0.0?0.28:1.0;
+ float alpha=clamp(inside*barMask+halo*barMask,0.0,1.0)*bounds*reflectionAlpha;
  gl_FragColor=vec4(color*alpha,alpha);
 }`;
   return { vertex, fragment };

@@ -1453,29 +1453,54 @@ async function recordMobileVideo() {
   const startTime = isLoop ? 0 : (keyTimes.length > 1 ? keyTimes[0] : 0);
   const endTime = isLoop ? Number(S.animation.duration) || 8 : (keyTimes.length > 1 ? keyTimes.at(-1) : Number(S.animation.duration) || 8);
   const duration = clamp(endTime - startTime, 1, 30), fps = Math.min(30, S.animation.fps || 30);
+  const frameDelay = 1000 / fps;
   const savedScene = captureSceneState(), savedTime = S.animation.time, savedPlaying = S.animation.playing;
   const savedDuration = S.animation.duration, savedLoop = S.animation.loop;
-  const stream = cv.captureStream(fps), chunks = [], bits = clamp(Math.round(S.w * S.h * fps * .12), 4000000, 16000000);
-  const recorder = new MediaRecorder(stream, { mimeType: format.type, videoBitsPerSecond: bits });
-  recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
-  const stopped = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = event => reject(event.error || new Error('Ошибка записи')); });
+  const chunks = [], bits = clamp(Math.round(S.w * S.h * fps * .12), 4000000, 16000000);
+  let stream, videoTrack, recorder;
   try {
     suppressSpectrumDuringRecording = true;
-    S.animation.duration = endTime; S.animation.loop = isLoop;
-    S.animation.time = startTime; sampleAnimation(startTime); S.animation.playing = S.animation.keyframes.length > 1;
+    S.animation.duration = endTime; S.animation.loop = isLoop; S.animation.playing = false;
+    S.animation.time = startTime; sampleAnimation(startTime); render();
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    // Create the captured stream only after the canvas is on the first key.
+    // Chromium otherwise retains the editor's pre-export frame as video frame 0.
+    stream = cv.captureStream(fps); videoTrack = stream.getVideoTracks()[0];
+    recorder = new MediaRecorder(stream, { mimeType: format.type, videoBitsPerSecond: bits });
+    recorder.ondataavailable = event => { if (event.data?.size) chunks.push(event.data); };
+    const stopped = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = event => reject(event.error || new Error('Ошибка записи')); });
     recorder.start(250);
+    // Give the encoder a stable opening anchor as well. Some Chromium builds
+    // begin the first encoded sample only after the next canvas update.
+    for (let frame = 0; frame < 6; frame += 1) {
+      render();
+      if (typeof videoTrack?.requestFrame === 'function') videoTrack.requestFrame();
+      await new Promise(resolve => setTimeout(resolve, frameDelay));
+    }
     const started = performance.now();
-    while (performance.now() - started < duration * 1000) {
-      const elapsed = Math.min(duration, (performance.now() - started) / 1000);
-      androidExportButton.textContent = Math.ceil(elapsed) + '/' + Math.ceil(duration) + ' s';
-      await new Promise(resolve => setTimeout(resolve, 200));
+    while (true) {
+      const elapsed = (performance.now() - started) / 1000;
+      if (elapsed >= duration) break;
+      const frameTime = startTime + Math.min(duration, elapsed);
+      S.animation.time = frameTime; sampleAnimation(frameTime); render();
+      androidExportButton.textContent = Math.min(Math.ceil(duration), Math.ceil(elapsed)) + '/' + Math.ceil(duration) + ' s';
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    // MediaRecorder may discard a single canvas update made immediately before
+    // stop(). Explicitly submit several identical start frames so the encoded
+    // tail is byte-visually equal to the first frame and the WPE loop cannot jump.
+    S.animation.time = startTime; sampleAnimation(startTime);
+    for (let frame = 0; frame < 6; frame += 1) {
+      render();
+      if (typeof videoTrack?.requestFrame === 'function') videoTrack.requestFrame();
+      await new Promise(resolve => setTimeout(resolve, frameDelay));
     }
     recorder.stop(); await stopped;
     if (!chunks.length) throw new Error('Браузер не записал видеопоток');
     return { bytes: new Uint8Array(await new Blob(chunks, { type: format.type }).arrayBuffer()), extension: format.extension };
   } finally {
     suppressSpectrumDuringRecording = false;
-    stream.getTracks().forEach(track => track.stop());
+    stream?.getTracks().forEach(track => track.stop());
     S.animation.duration = savedDuration; S.animation.loop = savedLoop;
     S.animation.time = savedTime; S.animation.playing = savedPlaying; applySceneState(savedScene); refreshTimeline(); sync();
     androidExportButton.textContent = 'Android Scene'; androidExportButton.disabled = false;

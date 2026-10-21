@@ -1459,39 +1459,26 @@ function wpeColor(hex) {
 function nativeSpectrumShaders(layer) {
   const mirror = layer?.mirror !== false ? '1.0' : '0.0';
   const rotation = Number(layer?.rotation || 0).toFixed(3);
-  const vertex = `#include "common_vertex.h"
-uniform mat4 g_ModelViewProjectionMatrix;
-uniform vec4 g_AudioSpectrum16Left[4];
-uniform vec4 g_AudioSpectrum16Right[4];
+  const vertex = `uniform mat4 g_ModelViewProjectionMatrix;
 attribute vec3 a_Position;
 attribute vec2 a_TexCoord;
 varying vec2 v_TexCoord;
-varying lowp vec4 v_Audio0;
-varying lowp vec4 v_Audio1;
-varying lowp vec4 v_Audio2;
-varying lowp vec4 v_Audio3;
 void main(){
  gl_Position=mul(vec4(a_Position,1.0),g_ModelViewProjectionMatrix);
  v_TexCoord=a_TexCoord;
- v_Audio0=(g_AudioSpectrum16Left[0]+g_AudioSpectrum16Right[0])*0.5;
- v_Audio1=(g_AudioSpectrum16Left[1]+g_AudioSpectrum16Right[1])*0.5;
- v_Audio2=(g_AudioSpectrum16Left[2]+g_AudioSpectrum16Right[2])*0.5;
- v_Audio3=(g_AudioSpectrum16Left[3]+g_AudioSpectrum16Right[3])*0.5;
 }`;
-  const fragment = `#include "common_fragment.h"
+  const fragment = `#include "common.h"
 uniform float g_Sensitivity; // {"material":"sensitivity","default":1.35,"range":[0.1,12]}
 uniform float g_Width; // {"material":"width","default":100,"range":[25,250]}
 uniform float g_Height; // {"material":"height","default":100,"range":[25,250]}
 uniform float g_OffsetX; // {"material":"offsetx","default":0,"range":[-50,50]}
 uniform float g_OffsetY; // {"material":"offsety","default":0,"range":[-50,50]}
 uniform float g_Glow; // {"material":"glow","default":100,"range":[0,250]}
-uniform lowp vec3 g_ColorA; // {"material":"colora","default":"1 1 1"}
-uniform lowp vec3 g_ColorB; // {"material":"colorb","default":"0 0.9137 1"}
+uniform vec3 g_ColorA; // {"material":"colora","default":"1 1 1"}
+uniform vec3 g_ColorB; // {"material":"colorb","default":"0 0.9137 1"}
+uniform float g_AudioSpectrum16Left[16];
+uniform float g_AudioSpectrum16Right[16];
 varying vec2 v_TexCoord;
-varying lowp vec4 v_Audio0;
-varying lowp vec4 v_Audio1;
-varying lowp vec4 v_Audio2;
-varying lowp vec4 v_Audio3;
 void main(){
  vec2 center=vec2(${Number(layer?.x ?? .5).toFixed(5)},${Number(layer?.y ?? .72).toFixed(5)})+vec2(g_OffsetX,g_OffsetY)/100.0;
  float angle=-${rotation}*0.01745329252,cs=cos(angle),sn=sin(angle);
@@ -1501,11 +1488,7 @@ void main(){
  float nx=p.x/width+0.5;
  float bounds=step(0.0,nx)*step(nx,1.0);
  int band=int(clamp(floor(nx*16.0),0.0,15.0));
- float audio=0.0;
- if(band==0)audio=v_Audio0.x;else if(band==1)audio=v_Audio0.y;else if(band==2)audio=v_Audio0.z;else if(band==3)audio=v_Audio0.w;
- else if(band==4)audio=v_Audio1.x;else if(band==5)audio=v_Audio1.y;else if(band==6)audio=v_Audio1.z;else if(band==7)audio=v_Audio1.w;
- else if(band==8)audio=v_Audio2.x;else if(band==9)audio=v_Audio2.y;else if(band==10)audio=v_Audio2.z;else if(band==11)audio=v_Audio2.w;
- else if(band==12)audio=v_Audio3.x;else if(band==13)audio=v_Audio3.y;else if(band==14)audio=v_Audio3.z;else audio=v_Audio3.w;
+ float audio=(g_AudioSpectrum16Left[band]+g_AudioSpectrum16Right[band])*0.5;
  audio*=g_Sensitivity;
  audio=clamp(pow(max(audio,0.0),0.72),0.0,1.25);
  float cell=frac(nx*16.0);
@@ -1524,12 +1507,55 @@ void main(){
   return { vertex, fragment };
 }
 
+function wpeBytes(content) {
+  return content instanceof Uint8Array ? content : new TextEncoder().encode(String(content));
+}
+
+function wpeWriteSized(view, bytes, offset) {
+  view.setUint32(offset, bytes.length, true);
+  new Uint8Array(view.buffer, offset + 4, bytes.length).set(bytes);
+  return offset + 4 + bytes.length;
+}
+
+function wpePackage(files, magic) {
+  const encoder = new TextEncoder(), names = Object.keys(files).sort(), entries = [];
+  let dataOffset = 0, headerSize = 4 + encoder.encode(magic).length + 4;
+  names.forEach(name => {
+    const path = name.replace(/\\/g, '/'), pathBytes = encoder.encode(path), data = wpeBytes(files[name]);
+    entries.push({ pathBytes, data, dataOffset });
+    dataOffset += data.length; headerSize += 4 + pathBytes.length + 8;
+  });
+  const output = new Uint8Array(headerSize + dataOffset), view = new DataView(output.buffer);
+  let cursor = wpeWriteSized(view, encoder.encode(magic), 0);
+  view.setUint32(cursor, entries.length, true); cursor += 4;
+  entries.forEach(entry => {
+    cursor = wpeWriteSized(view, entry.pathBytes, cursor);
+    view.setUint32(cursor, entry.dataOffset, true); cursor += 4;
+    view.setUint32(cursor, entry.data.length, true); cursor += 4;
+  });
+  entries.forEach(entry => { output.set(entry.data, cursor); cursor += entry.data.length; });
+  return output;
+}
+
+function wpeVideoTexture(mp4, width, height) {
+  const video = wpeBytes(mp4), output = new Uint8Array(91 + video.length), view = new DataView(output.buffer), encoder = new TextEncoder();
+  let cursor = 0;
+  const text = value => { const bytes = encoder.encode(value + '\0'); output.set(bytes, cursor); cursor += bytes.length; };
+  const u32 = value => { view.setUint32(cursor, value >>> 0, true); cursor += 4; };
+  text('TEXV0005'); text('TEXI0001');
+  u32(0); u32(0x22); u32(width); u32(height); u32(width); u32(height); u32(0);
+  text('TEXB0004'); u32(1); u32(0xffffffff); u32(0); u32(1);
+  u32(width); u32(height); u32(0); u32(video.length); u32(video.length);
+  output.set(video, cursor);
+  return output;
+}
+
 function nativeSceneFiles(video, preview) {
   const spectrum = S.layers.find(layer => layer.type === 'spectrum' && layer.visible) || Spectrum({ visible: true });
   normalizeSpectrum(spectrum);
   const shaders = nativeSpectrumShaders(spectrum);
   const manifest = {
-    file: 'scene.json', type: 'scene', title: projectName + ' · Android Scene',
+    file: 'scene.json', type: 'Scene', version: 4, title: projectName + ' · Android Scene',
     description: 'Native mobile Scene generated by NOCTURNE / LAB with live audio spectrum.', preview: 'preview.png',
     tags: ['Technology', 'Music'], visibility: 'private',
     general: { supportsaudioprocessing: true, supportsvideo: true, supportsvideoflags: 2, properties: {
@@ -1548,21 +1574,21 @@ function nativeSceneFiles(video, preview) {
     camera: { center: '0 0 -1.000', eye: '0 0 0.000', up: '0.000 1.000 0.000' },
     general: { bloom: false, clearcolor: '0 0 0', orthogonalprojection: { width: S.w, height: S.h }, supportsaudioprocessing: true },
     objects: [
-      { id: 1, name: 'NOCTURNE Background', image: 'models/background.json', origin: (S.w / 2) + ' ' + (S.h / 2) + ' 0', scale: '1 1 1' },
-      { id: 2, name: 'NOCTURNE Native Audio Spectrum', image: 'models/spectrum.json', origin: (S.w / 2) + ' ' + (S.h / 2) + ' -0.01', scale: '1 1 1' }
+      { id: 1, name: 'NOCTURNE Background', image: 'models/background.json', origin: (S.w / 2) + ' ' + (S.h / 2) + ' 0', size: S.w + ' ' + S.h, locktransforms: true, castshadow: false, parallaxDepth: '-1 -1' },
+      { id: 2, name: 'NOCTURNE Native Audio Spectrum', image: 'models/spectrum.json', origin: (S.w / 2) + ' ' + (S.h / 2) + ' -0.01', size: S.w + ' ' + S.h, locktransforms: true, castshadow: false, parallaxDepth: '-1 -1' }
     ]
   };
   const backgroundModel = { material: 'materials/background.json', nopadding: true, autosize: true };
   const spectrumModel = { material: 'materials/spectrum.json', nopadding: true, autosize: true };
-  const backgroundMaterial = { passes: [{ blending: 'normal', cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'genericimage', textures: ['materials/background.mp4'] }] };
-  const spectrumMaterial = { passes: [{ blending: 'additive', cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'nocturne_spectrum', textures: ['materials/background.mp4'], usershadervalues: {
+  const backgroundMaterial = { passes: [{ alphawriting: 'default', blending: 'normal', combos: { VERSION: 2 }, cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'genericimage3', textures: ['background'] }] };
+  const spectrumMaterial = { passes: [{ blending: 'additive', cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'nocturne_spectrum', usershadervalues: {
     nocturnesensitivity: 'sensitivity', nocturnewidth: 'width', nocturneheight: 'height', nocturneoffsetx: 'offsetx', nocturneoffsety: 'offsety', nocturneglow: 'glow', nocturnecolora: 'colora', nocturnecolorb: 'colorb'
   } }] };
   return {
     'project.json': JSON.stringify(manifest, null, 2), 'scene.json': JSON.stringify(scene, null, 2), 'preview.png': preview,
     'models/background.json': JSON.stringify(backgroundModel, null, 2), 'models/spectrum.json': JSON.stringify(spectrumModel, null, 2),
     'materials/background.json': JSON.stringify(backgroundMaterial, null, 2), 'materials/spectrum.json': JSON.stringify(spectrumMaterial, null, 2),
-    'materials/background.mp4': video.bytes, 'shaders/nocturne_spectrum.vert': shaders.vertex, 'shaders/nocturne_spectrum.frag': shaders.fragment
+    'materials/background.tex': wpeVideoTexture(video.bytes, S.w, S.h), 'shaders/nocturne_spectrum.vert': shaders.vertex, 'shaders/nocturne_spectrum.frag': shaders.fragment
   };
 }
 
@@ -1572,10 +1598,13 @@ async function exportAndroidPackage() {
     setProjectName(projectNameInput.value); toast('Запись мобильного цикла началась');
     const video = await recordMobileVideo(), preview = await createWallpaperPreview();
     const safeBatchName = (projectFileStem() + '-android').replace(/%/g, '%%').replace(/!/g, '').replace(/[&()^]/g, '-');
-    const installer = '@echo off\r\nsetlocal\r\nset "WPE_DIR=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" set "WPE_DIR=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" (echo Wallpaper Engine not found.&pause&exit /b 1)\r\nset "DEST=%WPE_DIR%\\projects\\myprojects\\' + safeBatchName + '"\r\nif not exist "%DEST%" mkdir "%DEST%"\r\nrobocopy "%~dp0." "%DEST%" /E /R:1 /W:1 /XF INSTALL-ANDROID.cmd >nul\r\nif errorlevel 8 (echo Could not install the project.&pause&exit /b 1)\r\nstart "" /D "%WPE_DIR%" "%WPE_DIR%\\launcher.exe"\r\necho Native Android-compatible Scene project installed.\r\necho Select it in Wallpaper Engine and choose Send to Mobile Device.\r\npause\r\n';
-    const readme = 'Нативный WPE Scene-проект для Android. Фоновая анимация записана строго от первого до последнего ключа, без спектра. Аудиовизуализатор рисуется нативным шейдером WPE и получает живой спектр через Scene API.\r\n\r\nРаспакуйте ZIP, запустите INSTALL-ANDROID.cmd, выберите вариант «Android Scene» в Wallpaper Engine и нажмите «Отправить на мобильное устройство».\r\n';
-    const files = nativeSceneFiles(video, preview);
-    files['INSTALL-ANDROID.cmd'] = installer; files['README.txt'] = readme;
+    const installer = '@echo off\r\nsetlocal\r\nset "WPE_DIR=C:\\Program Files (x86)\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" set "WPE_DIR=C:\\Program Files\\Steam\\steamapps\\common\\wallpaper_engine"\r\nif not exist "%WPE_DIR%\\launcher.exe" (echo Wallpaper Engine not found.&pause&exit /b 1)\r\nset "DEST=%WPE_DIR%\\projects\\myprojects\\' + safeBatchName + '"\r\nif not exist "%DEST%" mkdir "%DEST%"\r\nrobocopy "%~dp0." "%DEST%" /E /R:1 /W:1 /XF INSTALL-ANDROID.cmd README.txt DIRECT-MOBILE.mpkg >nul\r\nif errorlevel 8 (echo Could not install the project.&pause&exit /b 1)\r\nstart "" /D "%WPE_DIR%" "%WPE_DIR%\\launcher.exe"\r\necho Native Android-compatible Scene project installed.\r\necho Select it in Wallpaper Engine and choose Send to Mobile Device.\r\npause\r\n';
+    const readme = 'Нативный WPE Scene-проект для Android. Фоновая анимация записана строго от первого до последнего ключа, без спектра. Аудиовизуализатор рисуется нативным шейдером WPE и получает живой спектр через Scene API.\r\n\r\nОсновной путь: распакуйте ZIP, запустите INSTALL-ANDROID.cmd, выберите Android Scene в Wallpaper Engine и нажмите «Отправить на мобильное устройство». Если копирование через ПК не сработает, перенесите DIRECT-MOBILE.mpkg на телефон и откройте его в Wallpaper Engine Android.\r\n';
+    const sourceFiles = nativeSceneFiles(video, preview), projectJson = sourceFiles['project.json'], previewPng = sourceFiles['preview.png'];
+    const sceneFiles = Object.fromEntries(Object.entries(sourceFiles).filter(([name]) => name !== 'project.json' && name !== 'preview.png'));
+    const scenePackage = wpePackage(sceneFiles, 'PKGV0021');
+    const mobilePackage = wpePackage(sourceFiles, 'PKGM0019');
+    const files = { 'project.json': projectJson, 'preview.png': previewPng, 'scene.pkg': scenePackage, 'DIRECT-MOBILE.mpkg': mobilePackage, 'INSTALL-ANDROID.cmd': installer, 'README.txt': readme };
     const blob = zipStore(files);
     const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = projectFileStem() + '-android-wpe.zip'; link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 2000); toast('Android Scene с живым спектром готов');

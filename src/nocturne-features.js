@@ -660,10 +660,12 @@ ov.ondblclick = event => {
 /* Audio visualizer. Wallpaper Engine supplies 64 bins for each stereo channel. */
 const audioTarget = new Float32Array(64);
 const audioCurrent = new Float32Array(64);
+const audioPreviewTarget = new Float32Array(64);
 let audioInputSeen = false;
 let audioLastSeen = 0;
 let editorAudioGain = 1;
 let editorAudioUpdatedAt = performance.now();
+let audioPreviewNextAt = 0;
 let featureClock = 0;
 let suppressSpectrumDuringRecording = false;
 
@@ -716,6 +718,25 @@ function sampleAudioBand(values, normalizedIndex, count) {
   return Math.sqrt(power / Math.max(.001, weightSum));
 }
 
+function updateAudioPreview(now) {
+  if (now < audioPreviewNextAt) return;
+  audioPreviewNextAt = now + 70 + Math.random() * 65;
+  const anchors = new Float32Array(10);
+  const beat = Math.random() < .38 ? .45 + Math.random() * .5 : Math.random() * .24;
+  for (let index = 0; index < anchors.length; index++) {
+    const frequency = index / (anchors.length - 1);
+    const rolloff = .92 - frequency * .5;
+    const transient = index < 3 ? beat * (1 - index * .22) : 0;
+    anchors[index] = clamp((.06 + Math.random() * .38) * rolloff + transient, .025, 1);
+  }
+  for (let index = 0; index < 64; index++) {
+    const position = index / 63 * (anchors.length - 1);
+    const left = Math.floor(position), mixValue = position - left;
+    const band = anchors[left] + (anchors[Math.min(anchors.length - 1, left + 1)] - anchors[left]) * mixValue;
+    audioPreviewTarget[index] = clamp(band * (.88 + Math.random() * .24), .02, 1);
+  }
+}
+
 function updateEditorAudio(layer) {
   const now = performance.now();
   const delta = clamp((now - editorAudioUpdatedAt) / 1000, 1 / 240, .1);
@@ -729,15 +750,15 @@ function updateEditorAudio(layer) {
   const inertia = .3 + clamp(layer.smoothing, 0, .96) * 1.7;
   const attack = Math.max(12, layer.attack || 70) / 1000 * inertia;
   const release = Math.max(30, layer.release || 260) / 1000 * inertia;
+  if (!audioInputSeen && layer.idleMotion) updateAudioPreview(now);
   for (let index = 0; index < 64; index++) {
     const frequency = index / 63;
     const tone = (layer.bassBoost || 1) + ((layer.trebleBoost || 1) - (layer.bassBoost || 1)) * frequency;
     const gate = clamp(layer.noiseGate || 0, 0, .4);
     const gated = audioTarget[index] <= gate ? 0 : (audioTarget[index] - gate) / Math.max(.001, 1 - gate);
-    const idle = .16 + .12 * Math.sin(featureClock * 1.8 + index * .37) + .05 * Math.sin(featureClock * .7 + index * .11);
     const target = audioInputSeen
       ? Math.pow(clamp(gated * editorAudioGain * (layer.audioBoost || 1) * tone, 0, 1), .72)
-      : (layer.idleMotion ? Math.max(.02, idle) : 0);
+      : (layer.idleMotion ? audioPreviewTarget[index] : 0);
     const tau = target > audioCurrent[index] ? attack : release;
     const alpha = 1 - Math.exp(-delta / Math.max(.008, tau));
     audioCurrent[index] += (target - audioCurrent[index]) * alpha;
@@ -976,7 +997,7 @@ ui = function enhancedUi() {
       row('Атака', 'attack', 15, 300, 5, value => value + ' мс') + row('Спад', 'release', 40, 1200, 10, value => value + ' мс') +
       row('Низкие частоты', 'bassBoost', .25, 3, .05) + row('Высокие частоты', 'trebleBoost', .25, 3, .05) +
       '<div class="row"><label><input type="checkbox" data-spectrum-bool="autoGain" ' + (layer.autoGain ? 'checked' : '') + '> Автоусиление тихого сигнала</label></div>' +
-      '<div class="row"><label><input type="checkbox" data-spectrum-bool="idleMotion" ' + (layer.idleMotion ? 'checked' : '') + '> Анимация без звука</label></div></div>' +
+      '<div class="row"><label><input type="checkbox" data-spectrum-bool="idleMotion" ' + (layer.idleMotion ? 'checked' : '') + '> Предпросмотр без звука (псевдоаудио)</label></div></div>' +
       styleGroup(layer) + '<div class="group"><h3>Положение</h3>' + row('Масштаб', 'scale', .1, 3, .01, value => Math.round(value * 100) + '%') +
       row('Поворот', 'rotation', -180, 180, 1, value => value + '°') + '<div class="pair"><div class="row"><div class="label">X</div><input style="width:100%" type="number" data-key="x" step=".01" value="' + layer.x.toFixed(2) + '"></div><div class="row"><div class="label">Y</div><input style="width:100%" type="number" data-key="y" step=".01" value="' + layer.y.toFixed(2) + '"></div></div></div>';
     bind();
@@ -1104,6 +1125,13 @@ function applySceneState(state) {
 function sampleAnimation(time) {
   const frames = S.animation.keyframes.slice().sort((a, b) => a.time - b.time);
   if (!frames.length) return;
+  if (S.animation.loop && frames.length > 1) {
+    const duration = Math.max(.0001, Number(S.animation.duration) || 8);
+    const first = frames[0];
+    if (frames.at(-1).time >= duration - .0001) frames[frames.length - 1] = { time: duration, state: first.state };
+    else frames.push({ time: duration, state: first.state });
+    time = ((Number(time) || 0) % duration + duration) % duration;
+  }
   if (frames.length === 1 || time <= frames[0].time) return applySceneState(frames[0].state);
   if (time >= frames.at(-1).time) return applySceneState(frames.at(-1).state);
   const rightIndex = frames.findIndex(frame => frame.time >= time);
@@ -1271,7 +1299,7 @@ function zipStore(files) {
 function wallpaperRuntimeHtml(project) {
   const data = JSON.stringify(project).replace(/</g, '\\u003c');
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="icon" href="data:,"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}canvas{display:block;width:100%;height:100%}</style></head><body><canvas id="c"></canvas><script>
-const P=${data},cv=document.getElementById('c'),leftBins=new Float32Array(64),rightBins=new Float32Array(64),bins=new Float32Array(64),smooth=new Float32Array(64),R={channel:'stereo',gain:1,status:false,sensitivity:null,gate:null,smoothing:null,attack:null,release:null,bass:null,treble:null,bars:null,style:'project',width:1,height:1,offsetX:0,offsetY:0,glow:1,mirror:null,autoGain:null,idle:null,fit:'cover',quality:'balanced',fps:0};let x=cv.getContext('2d',{alpha:false}),hasAudio=false,lastAudioAt=0,lastSignalAt=0,audioGain=1,audioUpdatedAt=performance.now(),audioFrameStamp=-1,start=performance.now(),audioRegistered=false;
+const P=${data},cv=document.getElementById('c'),leftBins=new Float32Array(64),rightBins=new Float32Array(64),bins=new Float32Array(64),smooth=new Float32Array(64),idleBins=new Float32Array(64),R={channel:'stereo',gain:1,status:false,sensitivity:null,gate:null,smoothing:null,attack:null,release:null,bass:null,treble:null,bars:null,style:'project',width:1,height:1,offsetX:0,offsetY:0,glow:1,mirror:null,autoGain:null,idle:null,fit:'cover',quality:'balanced',fps:0};let x=cv.getContext('2d',{alpha:false}),hasAudio=false,lastAudioAt=0,lastSignalAt=0,audioGain=1,audioUpdatedAt=performance.now(),audioFrameStamp=-1,idleNextAt=0,start=performance.now(),audioRegistered=false;
 if(typeof FontFace==='function')(P.layers||[]).filter(l=>l.type==='clock'&&l.fontData).forEach(l=>{new FontFace(l.fontFamily,'url('+l.fontData+')').load().then(f=>document.fonts.add(f)).catch(()=>{})});
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),rgb=h=>{let q=h.slice(1);return[parseInt(q.slice(0,2),16),parseInt(q.slice(2,4),16),parseInt(q.slice(4,6),16)]},mix=(a,b,t)=>{let A=rgb(a),B=rgb(b);return'rgb('+A.map((v,i)=>Math.round(v+(B[i]-v)*t))+')'};
 function wallpaperAudioListener(samples){hasAudio=true;lastAudioAt=performance.now();let source=samples?.left&&samples?.right?null:samples,length=Number(source?.length)||0,stereoBins=length>=128?Math.floor(length/2):0,monoBins=stereoBins?stereoBins:length,read=(channel,index)=>{let values=samples?.[channel]||source,count=Number(values?.length)||monoBins;if(!count)return 0;let sourceIndex=Math.min(count-1,Math.round(index*(count-1)/63)),offset=!samples?.[channel]&&channel==='right'&&stereoBins?stereoBins:0;return Number(values?.[offset+sourceIndex])||0},peak=0;for(let i=0;i<64;i++){let left=clamp(read('left',i),0,1),right=clamp(samples?.right||stereoBins?read('right',i):left,0,1);leftBins[i]=left;rightBins[i]=right;peak=Math.max(peak,left,right)}if(peak>.0005)lastSignalAt=lastAudioAt}
@@ -1281,12 +1309,13 @@ registerWallpaperAudio();setInterval(()=>{if(!lastAudioAt||performance.now()-las
 window.wallpaperPropertyListener={applyUserProperties:function(p){registerWallpaperAudio();let number=(key,target,min,max,scale=1)=>{if(p[key])R[target]=clamp(Number(p[key].value)*scale,min,max)};if(p.nocturneaudiochannel)R.channel=String(p.nocturneaudiochannel.value||'stereo');number('nocturnegain','gain',.25,8);number('nocturneaudiogain','gain',.25,8);number('nocturnesensitivity','sensitivity',.1,12);number('nocturnegate','gate',0,.4);number('nocturnesmoothing','smoothing',0,.96);number('nocturneattack','attack',12,500);number('nocturnerelease','release',30,1600);number('nocturnebass','bass',.25,4);number('nocturnetreble','treble',.25,4);number('nocturnebars','bars',8,64);number('nocturnewidth','width',.25,2.5,.01);number('nocturneheight','height',.25,2.5,.01);number('nocturneoffsetx','offsetX',-.5,.5,.01);number('nocturneoffsety','offsetY',-.5,.5,.01);number('nocturneglow','glow',0,2.5,.01);if(p.nocturnestyle)R.style=String(p.nocturnestyle.value||'project');if(p.nocturnemirror)R.mirror=!!p.nocturnemirror.value;if(p.nocturneautogain)R.autoGain=!!p.nocturneautogain.value;if(p.nocturneidlemotion)R.idle=!!p.nocturneidlemotion.value;if(p.nocturneaudiostatus)R.status=!!p.nocturneaudiostatus.value;if(p.nocturnefit)R.fit=String(p.nocturnefit.value||'cover');if(p.nocturnequality){R.quality=String(p.nocturnequality.value||'balanced');resize()}if(p.nocturnefps)R.fps=Number(p.nocturnefps.value)||0}};
 function clone(v){return JSON.parse(JSON.stringify(v))}function iv(a,b,t){if(typeof a==='number'&&typeof b==='number')return a+(b-a)*t;if(Array.isArray(a)&&Array.isArray(b)&&a.length===b.length)return a.map((v,i)=>iv(v,b[i],t));if(a&&b&&typeof a==='object'&&typeof b==='object'){let o={};new Set([...Object.keys(a),...Object.keys(b)]).forEach(k=>o[k]=iv(a[k],b[k],t));return o}return t<.5?clone(a):clone(b)}
 function completeScene(s){let by=new Map((s?.layers||[]).map(l=>[l.id,l]));return{canvas:Object.assign({},P.canvas,s?.canvas||{}),layers:(P.layers||[]).map(l=>Object.assign(clone(l),clone(by.get(l.id)||{})))}}const animationFrames=(P.animation?.keyframes||[]).map(f=>({time:+f.time||0,state:completeScene(f.state)})).sort((a,b)=>a.time-b.time);
-function sceneAt(t){let base={canvas:P.canvas,layers:P.layers},a=P.animation,f=animationFrames;if(!f.length)return base;if(f.length===1)return f[0].state;if(t<=f[0].time)return f[0].state;if(t>=f[f.length-1].time)return f[f.length-1].state;let i=f.findIndex(q=>q.time>=t),l=f[i-1],r=f[i],u=(t-l.time)/(r.time-l.time);if(a.easing==='smooth')u=u*u*(3-2*u);return iv(l.state,r.state,u)}
+function sceneAt(t){let base={canvas:P.canvas,layers:P.layers},a=P.animation,f=animationFrames.slice();if(!f.length)return base;if(f.length===1)return f[0].state;if(a?.loop!==false){let d=Math.max(.0001,+a.duration||8),first=f[0];if(f[f.length-1].time>=d-.0001)f[f.length-1]={time:d,state:first.state};else f.push({time:d,state:first.state});t=((+t||0)%d+d)%d}if(t<=f[0].time)return f[0].state;if(t>=f[f.length-1].time)return f[f.length-1].state;let i=f.findIndex(q=>q.time>=t),l=f[i-1],r=f[i],u=(t-l.time)/(r.time-l.time);if(a.easing==='smooth')u=u*u*(3-2*u);return iv(l.state,r.state,u)}
 function tr(l){x.translate(l.x*P.canvas.w,l.y*P.canvas.h);x.rotate(l.rotation*Math.PI/180);x.scale(l.scale*(l.scaleX||1),l.scale*(l.scaleY||1))}function guideMetric(a,type,u,v){let len=Number.isFinite(a.guideLength)?a.guideLength:(type==='wave'?1.05:.55),ang=(Number.isFinite(a.guideAngle)?a.guideAngle:(type==='wave'?90:0))*Math.PI/180,cu=+a.u||0,cv=type==='wave'?(Number.isFinite(a.v)?a.v:.5):(+a.t||0),du=Math.cos(ang)*len*.5,dv=Math.sin(ang)*len*.5,u1=cu-du,v1=cv-dv,u2=cu+du,v2=cv+dv,vx=u2-u1,vy=v2-v1,z=vx*vx+vy*vy||1e-6,q=clamp(((u-u1)*vx+(v-v1)*vy)/z,0,1),nu=u1+vx*q,nv=v1+vy*q;return{distance:Math.hypot(u-nu,v-nv),signed:(u-u1)*vy-(v-v1)*vx}}function influence(l,a,type,u,v){let m=guideMetric(a,type,u,v),r=Math.max(.025,l.anchorRadius||(type==='wave'?.1:.14)),k=Math.exp(-Math.pow(m.distance/r,2)*2.2),f=Math.max(.01,l.bendFeather||r),side=l.bendSide||'all';if(side==='positive')k*=clamp(m.signed/f+.5,0,1);else if(side==='negative')k*=clamp(-m.signed/f+.5,0,1);else if(side==='left')k*=clamp((a.u-u)/f+.5,0,1);else if(side==='right')k*=clamp((u-a.u)/f+.5,0,1);else if(side==='top')k*=clamp(((a.t??.5)-v)/f+.5,0,1);else if(side==='bottom')k*=clamp((v-(a.t??.5))/f+.5,0,1);return k}function pull(l,u,t){let o={x:0,y:0};(l.bendAnchors||[]).forEach(a=>{let k=influence(l,a,'grid',u,t);if(l.bendAxis!=='vertical')o.x+=(a.dx||0)*P.canvas.w*k;if(l.bendAxis!=='horizontal')o.y+=(a.dy||0)*P.canvas.h*k});return o}function gp(l,u,t){let W=P.canvas.w*1.18,H=P.canvas.h*.92,d=Math.pow(t,1+l.perspective*2);return{x:(u-.5)*W*(1+(1-d)*l.perspective*1.6),y:(d-.5)*H+Math.sin(u*Math.PI*2+t*4)*l.bend*P.canvas.h*(1-t*.55)}}
 function wave(l){let path=new Path2D(),steps=Math.min(110,Math.max(64,Math.round(12000/Math.max(1,l.lines))));for(let n=0;n<l.lines;n++){let k=n/(l.lines-1)-.5;for(let i=0;i<=steps;i++){let u=i/steps,base=k*l.spread*P.canvas.h+Math.sin(u*Math.PI*2*l.frequency+l.phase+k*l.twist*8)*l.amplitude*P.canvas.h*Math.sin(Math.PI*u)+Math.sin(u*Math.PI*4+l.phase*.45)*l.amplitude*P.canvas.h*.18+Math.sin(u*Math.PI*2+l.phase+k*3)*k*l.twist*P.canvas.h*.17,ap=(l.anchors||[]).reduce((s,a)=>s+(a.dy||0)*P.canvas.h*influence(l,a,'wave',u,k+.5),0),px=(u-.5)*P.canvas.w*1.35,py=base+ap;i?path.lineTo(px,py):path.moveTo(px,py)}}let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*Math.min(1,100/Math.max(1,l.lines))*(glow?.7:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.min(24,Math.max(2,(l.glow||0)*P.canvas.w/1920))+'px)':'none';x.strokeStyle=glow?l.glowColor:l.color;x.lineWidth=l.width*P.canvas.w/1920*(glow?2.2:1);x.stroke(path);x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
 function grid(l){let pass=glow=>{x.save();tr(l);x.globalAlpha=l.opacity*(glow?.68:1);x.globalCompositeOperation=glow?'lighter':l.blend;x.filter=glow?'blur('+Math.max(2,(l.glow||0)*P.canvas.w/1920)+'px)':'none';x.lineWidth=l.width*P.canvas.w/1920*(glow?2.1:1);let R=l.lines,C=Math.round(R*1.55);for(let r=0;r<=R;r++){let t=r/R;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,t):l.color);x.beginPath();for(let i=0;i<=100;i++){let u=i/100,p=gp(l,u,t),q=pull(l,u,t);i?x.lineTo(p.x+q.x,p.y+q.y):x.moveTo(p.x+q.x,p.y+q.y)}x.stroke()}for(let q=0;q<=C;q++){let u=q/C;x.strokeStyle=glow?l.glowColor:(l.paint==='gradient'?mix(l.color,l.color2,u):l.color);x.beginPath();for(let i=0;i<=70;i++){let t=i/70,p=gp(l,u,t),d=pull(l,u,t);i?x.lineTo(p.x+d.x,p.y+d.y):x.moveTo(p.x+d.x,p.y+d.y)}x.stroke()}x.restore()};if((l.glow||0)>0)pass(true);pass(false)}
 function spot(l){x.save();tr(l);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;let r=l.radius*P.canvas.w,g=x.createRadialGradient(0,0,r*(1-l.softness),0,0,r),A=rgb(l.color),B=rgb(l.color2);g.addColorStop(0,'rgba('+A.join(',')+',1)');g.addColorStop(.52,'rgba('+B.join(',')+',.62)');g.addColorStop(1,'rgba('+B.join(',')+',0)');x.scale(l.stretch,1);x.fillStyle=g;x.fillRect(-r,-r,r*2,r*2);x.restore()}
-function updateAudio(l,now){if(now-audioFrameStamp<4)return;let dt=clamp((now-audioUpdatedAt)/1000,1/240,.1);audioUpdatedAt=now;audioFrameStamp=now;if(hasAudio&&now-lastAudioAt>1200)hasAudio=false;let rms=0;for(let i=0;i<64;i++){let left=leftBins[i],right=rightBins[i],value=R.channel==='left'?left:R.channel==='right'?right:R.channel==='strongest'?Math.max(left,right):(left+right)*.5;bins[i]=value;rms+=value*value}rms=Math.sqrt(rms/64);let auto=R.autoGain===null?l.autoGain:R.autoGain,desired=hasAudio&&auto?clamp(.2/Math.max(.012,rms),.75,6):1;audioGain+=(desired-audioGain)*(desired<audioGain ? .2 : .045);let sm=R.smoothing===null?(l.smoothing??.72):R.smoothing,inertia=.3+clamp(sm,0,.96)*1.7,attack=Math.max(12,R.attack===null?(l.attack||70):R.attack)/1000*inertia,release=Math.max(30,R.release===null?(l.release||260):R.release)/1000*inertia,gate=R.gate===null?(l.noiseGate||0):R.gate,bass=R.bass===null?(l.bassBoost||1):R.bass,treble=R.treble===null?(l.trebleBoost||1):R.treble,idleOn=R.idle===null?l.idleMotion:R.idle;for(let i=0;i<64;i++){let f=i/63,tone=bass+(treble-bass)*f,gated=bins[i]<=gate?0:(bins[i]-gate)/Math.max(.001,1-gate),idle=.16+.12*Math.sin(now/1000*1.8+i*.37)+.05*Math.sin(now/1000*.7+i*.11),target=hasAudio?Math.pow(clamp(gated*audioGain*R.gain*(l.audioBoost||1)*tone,0,1),.72):(idleOn?Math.max(.02,idle):0),tau=target>smooth[i]?attack:release,alpha=1-Math.exp(-dt/Math.max(.008,tau));smooth[i]+=(target-smooth[i])*alpha}}
+function updateIdle(now){if(now<idleNextAt)return;idleNextAt=now+70+Math.random()*65;let a=new Float32Array(10),beat=Math.random()<.38?.45+Math.random()*.5:Math.random()*.24;for(let i=0;i<a.length;i++){let f=i/(a.length-1),roll=.92-f*.5,hit=i<3?beat*(1-i*.22):0;a[i]=clamp((.06+Math.random()*.38)*roll+hit,.025,1)}for(let i=0;i<64;i++){let p=i/63*(a.length-1),j=Math.floor(p),u=p-j,band=a[j]+(a[Math.min(a.length-1,j+1)]-a[j])*u;idleBins[i]=clamp(band*(.88+Math.random()*.24),.02,1)}}
+function updateAudio(l,now){if(now-audioFrameStamp<4)return;let dt=clamp((now-audioUpdatedAt)/1000,1/240,.1);audioUpdatedAt=now;audioFrameStamp=now;if(hasAudio&&now-lastAudioAt>1200)hasAudio=false;let rms=0;for(let i=0;i<64;i++){let left=leftBins[i],right=rightBins[i],value=R.channel==='left'?left:R.channel==='right'?right:R.channel==='strongest'?Math.max(left,right):(left+right)*.5;bins[i]=value;rms+=value*value}rms=Math.sqrt(rms/64);let auto=R.autoGain===null?l.autoGain:R.autoGain,desired=hasAudio&&auto?clamp(.2/Math.max(.012,rms),.75,6):1;audioGain+=(desired-audioGain)*(desired<audioGain ? .2 : .045);let sm=R.smoothing===null?(l.smoothing??.72):R.smoothing,inertia=.3+clamp(sm,0,.96)*1.7,attack=Math.max(12,R.attack===null?(l.attack||70):R.attack)/1000*inertia,release=Math.max(30,R.release===null?(l.release||260):R.release)/1000*inertia,gate=R.gate===null?(l.noiseGate||0):R.gate,bass=R.bass===null?(l.bassBoost||1):R.bass,treble=R.treble===null?(l.trebleBoost||1):R.treble,idleOn=R.idle===null?l.idleMotion:R.idle;if(!hasAudio&&idleOn)updateIdle(now);for(let i=0;i<64;i++){let f=i/63,tone=bass+(treble-bass)*f,gated=bins[i]<=gate?0:(bins[i]-gate)/Math.max(.001,1-gate),target=hasAudio?Math.pow(clamp(gated*audioGain*R.gain*(l.audioBoost||1)*tone,0,1),.72):(idleOn?idleBins[i]:0),tau=target>smooth[i]?attack:release,alpha=1-Math.exp(-dt/Math.max(.008,tau));smooth[i]+=(target-smooth[i])*alpha}}
 function sampleBand(t,n){let center=clamp(t,0,1)*63,radius=Math.max(.55,32/Math.max(8,n)),from=Math.max(0,Math.floor(center-radius)),to=Math.min(63,Math.ceil(center+radius)),power=0,weights=0;for(let i=from;i<=to;i++){let weight=Math.max(.08,1-Math.abs(i-center)/(radius+.75));power+=smooth[i]*smooth[i]*weight;weights+=weight}return Math.sqrt(power/Math.max(.001,weights))}
 function spectrum(l,time){let now=performance.now();updateAudio(l,now);let L=Object.assign({},l,{x:l.x+R.offsetX,y:l.y+R.offsetY}),style=R.style==='project'?l.spectrumStyle:R.style,mirror=R.mirror===null?l.mirror:R.mirror;x.save();tr(L);x.globalAlpha=l.opacity;x.globalCompositeOperation=l.blend;x.shadowBlur=Math.min(24,(l.glow||0)*R.glow*P.canvas.w/1920);x.shadowColor=l.glowColor;let n=Math.round(clamp(R.bars===null?(l.bars||48):R.bars,8,64)),W=l.width*R.width*P.canvas.w,H=l.height*R.height*P.canvas.h,s=W/n,bw=s*(1-l.gap),values=[],sensitivity=R.sensitivity===null?(l.sensitivity||1.35):R.sensitivity;for(let i=0;i<n;i++){let t=i/(n-1);values.push(Math.min(1.5,sampleBand(t,n)*sensitivity))}if(style==='line'){let line=sign=>{x.beginPath();for(let i=0;i<n;i++){let t=i/(n-1),px=(t-.5)*W,py=sign*values[i]*H;i?x.lineTo(px,py):x.moveTo(px,py)}x.stroke()};x.strokeStyle=l.color;x.lineWidth=Math.max(1,(l.patternDensity||1)*P.canvas.w/1920);line(-1);if(mirror){x.globalAlpha=l.opacity*.48;line(1)}}else for(let i=0;i<n;i++){let t=i/(n-1),v=values[i];x.fillStyle=mix(l.color,l.color2,t);if(style==='radial'){let r=Math.min(P.canvas.w,P.canvas.h)*l.width*R.width*.28,a=((l.spectrumAngle||0)-90)*Math.PI/180+(t-.5)*(l.spectrumArc||360)*Math.PI/180;x.strokeStyle=x.fillStyle;x.lineWidth=Math.max(1,bw*.32);x.beginPath();x.moveTo(Math.cos(a)*r,Math.sin(a)*r);x.lineTo(Math.cos(a)*(r+v*H*.55),Math.sin(a)*(r+v*H*.55));x.stroke()}else{x.fillRect(-W/2+i*s,-v*H,bw,Math.max(1,v*H));if(mirror){x.globalAlpha=l.opacity*.48;x.fillRect(-W/2+i*s,0,bw,Math.max(1,v*H));x.globalAlpha=l.opacity}}}x.restore()}
 function audioStatus(){if(!R.status)return;let now=performance.now(),callback=audioRegistered&&now-lastAudioAt<1500,signal=now-lastSignalAt<1500,label=signal?'AUDIO: SIGNAL OK':callback?'AUDIO: SOURCE IS SILENT':'AUDIO: NO INPUT - SETTINGS > GENERAL > MEDIA',color=signal?'#73ffb0':callback?'#ffd166':'#ff6b7a';x.save();x.setTransform(1,0,0,1,0,0);x.globalAlpha=.92;x.font=Math.max(13,cv.width/120)+'px Segoe UI, sans-serif';let pad=14,w=x.measureText(label).width+pad*2,h=38;x.fillStyle='rgba(0,0,0,.72)';x.fillRect(18,18,w,h);x.fillStyle=color;x.textBaseline='middle';x.fillText(label,18+pad,18+h/2);x.restore()}
@@ -1420,8 +1449,9 @@ async function recordMobileVideo() {
   const format = preferredVideoMimeType(); if (!format) throw new Error('В браузере нет подходящего видеокодека');
   if (format.extension !== 'mp4') throw new Error('Для Android Scene нужен браузер с записью MP4/H.264');
   const keyTimes = (S.animation.keyframes || []).map(frame => Number(frame.time)).filter(Number.isFinite).sort((a, b) => a - b);
-  const startTime = keyTimes.length > 1 ? keyTimes[0] : 0;
-  const endTime = keyTimes.length > 1 ? keyTimes.at(-1) : Number(S.animation.duration) || 8;
+  const isLoop = S.animation.loop !== false;
+  const startTime = isLoop ? 0 : (keyTimes.length > 1 ? keyTimes[0] : 0);
+  const endTime = isLoop ? Number(S.animation.duration) || 8 : (keyTimes.length > 1 ? keyTimes.at(-1) : Number(S.animation.duration) || 8);
   const duration = clamp(endTime - startTime, 1, 30), fps = Math.min(30, S.animation.fps || 30);
   const savedScene = captureSceneState(), savedTime = S.animation.time, savedPlaying = S.animation.playing;
   const savedDuration = S.animation.duration, savedLoop = S.animation.loop;
@@ -1431,7 +1461,7 @@ async function recordMobileVideo() {
   const stopped = new Promise((resolve, reject) => { recorder.onstop = resolve; recorder.onerror = event => reject(event.error || new Error('Ошибка записи')); });
   try {
     suppressSpectrumDuringRecording = true;
-    S.animation.duration = endTime; S.animation.loop = false;
+    S.animation.duration = endTime; S.animation.loop = isLoop;
     S.animation.time = startTime; sampleAnimation(startTime); S.animation.playing = S.animation.keyframes.length > 1;
     recorder.start(250);
     const started = performance.now();
@@ -1459,6 +1489,9 @@ function wpeColor(hex) {
 function nativeSpectrumShaders(layer) {
   const mirror = layer?.mirror !== false ? '1.0' : '0.0';
   const rotation = Number(layer?.rotation || 0).toFixed(3);
+  const layerScale = Math.max(0.001, Number(layer?.scale || 1));
+  const spectrumWidth = Math.max(0.01, Number(layer?.width || .72) * layerScale * Math.max(0.001, Number(layer?.scaleX || 1)));
+  const spectrumHeight = Math.max(0.01, Number(layer?.height || .23) * layerScale * Math.max(0.001, Number(layer?.scaleY || 1)));
   const vertex = `uniform mat4 g_ModelViewProjectionMatrix;
 attribute vec3 a_Position;
 attribute vec2 a_TexCoord;
@@ -1483,8 +1516,8 @@ void main(){
  vec2 center=vec2(${Number(layer?.x ?? .5).toFixed(5)},${Number(layer?.y ?? .72).toFixed(5)})+vec2(g_OffsetX,g_OffsetY)/100.0;
  float angle=-${rotation}*0.01745329252,cs=cos(angle),sn=sin(angle);
  vec2 p=v_TexCoord-center;p=vec2(cs*p.x-sn*p.y,sn*p.x+cs*p.y);
- float width=max(0.01,${Number(layer?.width || .72).toFixed(5)}*g_Width/100.0);
- float height=max(0.01,${Number(layer?.height || .23).toFixed(5)}*g_Height/100.0);
+ float width=max(0.01,${spectrumWidth.toFixed(5)}*g_Width/100.0);
+ float height=max(0.01,${spectrumHeight.toFixed(5)}*g_Height/100.0);
  float nx=p.x/width+0.5;
  float bounds=step(0.0,nx)*step(nx,1.0);
  int band=int(clamp(floor(nx*16.0),0.0,15.0));
@@ -1560,7 +1593,7 @@ function nativeSceneFiles(video, preview) {
     tags: ['Technology', 'Music'], visibility: 'private',
     general: { supportsaudioprocessing: true, supportsvideo: true, supportsvideoflags: 2, properties: {
       nocturneaudioheading: { order: 90, text: '<h3>Аудиоспектр</h3>', type: 'text' },
-      nocturnesensitivity: { index: 0, order: 100, text: 'Чувствительность', type: 'slider', value: Number(spectrum.sensitivity || 1.35), min: .1, max: 12, step: .05, fraction: true, precision: 2 },
+      nocturnesensitivity: { index: 0, order: 100, text: 'Чувствительность', type: 'slider', value: Math.min(12, Number(spectrum.sensitivity || 1.35) * Number(spectrum.audioBoost || 1)), min: .1, max: 12, step: .05, fraction: true, precision: 2 },
       nocturnewidth: { index: 1, order: 101, text: 'Ширина, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
       nocturneheight: { index: 2, order: 102, text: 'Высота, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
       nocturneoffsetx: { index: 3, order: 103, text: 'Смещение X, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },

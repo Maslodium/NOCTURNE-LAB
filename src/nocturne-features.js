@@ -1522,7 +1522,7 @@ void main(){
  float bounds=step(0.0,nx)*step(nx,1.0);
  int band=int(clamp(floor(nx*16.0),0.0,15.0));
  float audio=(g_AudioSpectrum16Left[band]+g_AudioSpectrum16Right[band])*0.5;
- audio*=g_Sensitivity;
+ audio*=g_Sensitivity*0.1;
  audio=clamp(pow(max(audio,0.0),0.72),0.0,1.25);
  float cell=frac(nx*16.0);
  float gap=${Number(layer?.gap ?? .24).toFixed(5)}*0.48;
@@ -1593,7 +1593,7 @@ function nativeSceneFiles(video, preview) {
     tags: ['Technology', 'Music'], visibility: 'private',
     general: { supportsaudioprocessing: true, supportsvideo: true, supportsvideoflags: 2, properties: {
       nocturneaudioheading: { order: 90, text: '<h3>Аудиоспектр</h3>', type: 'text' },
-      nocturnesensitivity: { index: 0, order: 100, text: 'Чувствительность', type: 'slider', value: Math.min(12, Number(spectrum.sensitivity || 1.35) * Number(spectrum.audioBoost || 1)), min: .1, max: 12, step: .05, fraction: true, precision: 2 },
+      nocturnesensitivity: { index: 0, order: 100, text: 'Чувствительность', type: 'slider', value: Math.min(12, Number(spectrum.sensitivity || 1.35) * Number(spectrum.audioBoost || 1)), min: .01, max: 12, step: .005, fraction: true, precision: 3 },
       nocturnewidth: { index: 1, order: 101, text: 'Ширина, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
       nocturneheight: { index: 2, order: 102, text: 'Высота, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
       nocturneoffsetx: { index: 3, order: 103, text: 'Смещение X, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },

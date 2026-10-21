@@ -1502,6 +1502,7 @@ void main(){
 }`;
   const fragment = `#include "common.h"
 uniform float g_Sensitivity; // {"material":"sensitivity","default":1.35,"range":[0.1,12]}
+uniform float g_Bars; // {"material":"bars","default":64,"range":[8,64]}
 uniform float g_Width; // {"material":"width","default":100,"range":[25,250]}
 uniform float g_Height; // {"material":"height","default":100,"range":[25,250]}
 uniform float g_OffsetX; // {"material":"offsetx","default":0,"range":[-50,50]}
@@ -1520,11 +1521,15 @@ void main(){
  float height=max(0.01,${spectrumHeight.toFixed(5)}*g_Height/100.0);
  float nx=p.x/width+0.5;
  float bounds=step(0.0,nx)*step(nx,1.0);
- int band=int(clamp(floor(nx*16.0),0.0,15.0));
- float audio=(g_AudioSpectrum16Left[band]+g_AudioSpectrum16Right[band])*0.5;
+ float audioPosition=clamp(nx,0.0,1.0)*15.0;
+ int bandA=int(floor(audioPosition));
+ int bandB=min(15,bandA+1);
+ float audioA=(g_AudioSpectrum16Left[bandA]+g_AudioSpectrum16Right[bandA])*0.5;
+ float audioB=(g_AudioSpectrum16Left[bandB]+g_AudioSpectrum16Right[bandB])*0.5;
+ float audio=mix(audioA,audioB,frac(audioPosition));
  audio*=g_Sensitivity*0.1;
  audio=clamp(pow(max(audio,0.0),0.72),0.0,1.25);
- float cell=frac(nx*16.0);
+ float cell=frac(nx*clamp(floor(g_Bars+0.5),8.0,64.0));
  float gap=${Number(layer?.gap ?? .24).toFixed(5)}*0.48;
  float edgeA=smoothstep(gap,gap+0.025,cell);
  float edgeB=smoothstep(gap,gap+0.025,1.0-cell);
@@ -1594,13 +1599,14 @@ function nativeSceneFiles(video, preview) {
     general: { supportsaudioprocessing: true, supportsvideo: true, supportsvideoflags: 2, properties: {
       nocturneaudioheading: { order: 90, text: '<h3>Аудиоспектр</h3>', type: 'text' },
       nocturnesensitivity: { index: 0, order: 100, text: 'Чувствительность', type: 'slider', value: Math.min(12, Number(spectrum.sensitivity || 1.35) * Number(spectrum.audioBoost || 1)), min: .01, max: 12, step: .005, fraction: true, precision: 3 },
-      nocturnewidth: { index: 1, order: 101, text: 'Ширина, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
-      nocturneheight: { index: 2, order: 102, text: 'Высота, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
-      nocturneoffsetx: { index: 3, order: 103, text: 'Смещение X, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
-      nocturneoffsety: { index: 4, order: 104, text: 'Смещение Y, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
-      nocturneglow: { index: 5, order: 105, text: 'Свечение, %', type: 'slider', value: 100, min: 0, max: 250, step: 5 },
-      nocturnecolora: { index: 6, order: 106, text: 'Цвет низких частот', type: 'color', value: wpeColor(spectrum.color) },
-      nocturnecolorb: { index: 7, order: 107, text: 'Цвет высоких частот', type: 'color', value: wpeColor(spectrum.color2) }
+      nocturnebars: { index: 1, order: 101, text: 'Количество полос', type: 'slider', value: Math.round(clamp(Number(spectrum.bars || 64), 8, 64)), min: 8, max: 64, step: 1 },
+      nocturnewidth: { index: 2, order: 102, text: 'Ширина, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
+      nocturneheight: { index: 3, order: 103, text: 'Высота, %', type: 'slider', value: 100, min: 25, max: 250, step: 1 },
+      nocturneoffsetx: { index: 4, order: 104, text: 'Смещение X, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
+      nocturneoffsety: { index: 5, order: 105, text: 'Смещение Y, %', type: 'slider', value: 0, min: -50, max: 50, step: 1 },
+      nocturneglow: { index: 6, order: 106, text: 'Свечение, %', type: 'slider', value: 100, min: 0, max: 250, step: 5 },
+      nocturnecolora: { index: 7, order: 107, text: 'Цвет низких частот', type: 'color', value: wpeColor(spectrum.color) },
+      nocturnecolorb: { index: 8, order: 108, text: 'Цвет высоких частот', type: 'color', value: wpeColor(spectrum.color2) }
     } }
   };
   const scene = {
@@ -1615,7 +1621,7 @@ function nativeSceneFiles(video, preview) {
   const spectrumModel = { material: 'materials/spectrum.json', nopadding: true, autosize: true };
   const backgroundMaterial = { passes: [{ alphawriting: 'default', blending: 'normal', combos: { VERSION: 2 }, cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'genericimage3', textures: ['background'] }] };
   const spectrumMaterial = { passes: [{ blending: 'additive', cullmode: 'nocull', depthtest: 'disabled', depthwrite: 'disabled', shader: 'nocturne_spectrum', usershadervalues: {
-    nocturnesensitivity: 'sensitivity', nocturnewidth: 'width', nocturneheight: 'height', nocturneoffsetx: 'offsetx', nocturneoffsety: 'offsety', nocturneglow: 'glow', nocturnecolora: 'colora', nocturnecolorb: 'colorb'
+    nocturnesensitivity: 'sensitivity', nocturnebars: 'bars', nocturnewidth: 'width', nocturneheight: 'height', nocturneoffsetx: 'offsetx', nocturneoffsety: 'offsety', nocturneglow: 'glow', nocturnecolora: 'colora', nocturnecolorb: 'colorb'
   } }] };
   return {
     'project.json': JSON.stringify(manifest, null, 2), 'scene.json': JSON.stringify(scene, null, 2), 'preview.png': preview,
